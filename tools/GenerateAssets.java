@@ -172,6 +172,100 @@ public final class GenerateAssets {
                     v.set(x, 8, z, state("torch"));
                 }, List.of()));
             }
+        } else if (original.name.equals("hamlet_small")) {
+            plots.add(terrainPlot(original, "tower_0", 3, 3, 5, 5, 3, 3, 5, 5,
+                null, List.of(new Pos(5, 6, 7))));
+            plots.add(terrainPlot(original, "hut_0", 4, 18, 7, 5, 4, 18, 7, 5,
+                null, List.of(new Pos(7, 6, 18))));
+            plots.add(terrainPlot(original, "cottage_0", 19, 17, 9, 7, 19, 17, 9, 7,
+                null, List.of(new Pos(23, 6, 17))));
+            plots.add(terrainPlot(original, "farm_0", 21, 4, 5, 11, 21, 4, 5, 11, null, List.of()));
+            plots.add(terrainPlot(original, "market_stall_0", 12, 11, 5, 4, 12, 11, 5, 4, null, List.of()));
+            plots.add(terrainPlot(original, "charter", 15, 15, 1, 1, 15, 15, 1, 1, null, List.of()));
+            plots.add(terrainPlot(original, "guard_post_0", 14, 25, 1, 1, 14, 25, 1, 1, v -> {}, List.of()));
+            int[][] lights = {{15,2},{10,8},{20,8},{10,22},{20,22},{3,16},{27,16},{15,27}};
+            for (int i = 0; i < lights.length; i++) {
+                int x = lights[i][0], z = lights[i][1];
+                if (insideGround(plots, x, z)) continue;
+                plots.add(terrainPlot(original, "lamp_" + i, x, z, 1, 1, x, z, 1, 1, v -> lamp(v, x, z), List.of()));
+            }
+        } else if (original.name.equals("hamlet_large")) {
+            int[][] towers = {{3,3,7},{41,3,5},{3,39,5},{39,39,7}};
+            for (int i = 0; i < towers.length; i++) {
+                int x = towers[i][0], z = towers[i][1], s = towers[i][2];
+                plots.add(terrainPlot(original, "tower_" + i, x, z, s, s, x, z, s, s,
+                    null, List.of(new Pos(x + s / 2, 6, z + s - 1))));
+            }
+            int[][] houses = {{5,17,11,7},{18,6,13,7},{33,17,9,7},{7,29,7,5},{34,30,9,7},
+                {18,34,11,7},{32,6,9,7},{30,38,7,7}};
+            String[] names = {"barracks","longhouse","cottage_0","hut_0","cottage_1","cottage_2","smithy","storehouse"};
+            boolean[] south = {true,true,true,false,false,false,true,false};
+            for (int i = 0; i < houses.length; i++) {
+                int x = houses[i][0], z = houses[i][1], w = houses[i][2], d = houses[i][3];
+                plots.add(terrainPlot(original, names[i], x, z, w, d, x, z, w, d,
+                    null, List.of(new Pos(x + w / 2, 6, south[i] ? z + d - 1 : z))));
+            }
+            plots.add(terrainPlot(original, "well", 23, 28, 3, 3, 23, 28, 3, 3, null, List.of()));
+            plots.add(terrainPlot(original, "pen", 10, 3, 8, 6, 10, 3, 8, 6, null, List.of(new Pos(13, 6, 8))));
+            plots.add(terrainPlot(original, "farm_0", 29, 32, 4, 6, 29, 32, 4, 6, null, List.of()));
+            plots.add(terrainPlot(original, "farm_1", 42, 8, 5, 11, 42, 8, 5, 11, null, List.of()));
+            plots.add(terrainPlot(original, "market_stall_0", 18, 22, 5, 4, 18, 22, 5, 4, null, List.of()));
+            plots.add(terrainPlot(original, "market_stall_1", 27, 22, 5, 4, 27, 22, 5, 4, null, List.of()));
+            plots.add(terrainPlot(original, "charter", 23, 20, 4, 7, 23, 20, 4, 7, null, List.of()));
+            plots.add(terrainPlot(original, "quartermaster_post_0", 19, 20, 1, 1, 19, 20, 1, 1, v -> {}, List.of()));
+            plots.add(terrainPlot(original, "guard_post_0", 24, 43, 1, 1, 24, 43, 1, 1, v -> {}, List.of()));
+            plots.add(terrainPlot(original, "villager_post_0", 33, 35, 1, 1, 33, 35, 1, 1, v -> {}, List.of()));
+            int[][] lights = {{12,14},{36,14},{12,36},{36,36},{23,10},{25,40},{5,25},{43,25},{20,2},{28,46},{23,23},{27,27},{42,45}};
+            for (int i = 0; i < lights.length; i++) {
+                int x = lights[i][0], z = lights[i][1];
+                if (insideGround(plots, x, z)) continue;
+                plots.add(terrainPlot(original, "lamp_" + i, x, z, 1, 1, x, z, 1, 1, v -> lamp(v, x, z), List.of()));
+            }
+        } else if (original.name.equals("bandit_camp_small")) {
+            plots.add(terrainPlot(original, "tent_0", 2, 5, 5, 5, 2, 5, 5, 5, null, List.of(new Pos(4, 6, 9))));
+            plots.add(terrainPlot(original, "tent_1", 10, 5, 5, 5, 10, 5, 5, 5, null, List.of(new Pos(12, 6, 9))));
+            plots.add(terrainPlot(original, "fire", 8, 10, 1, 1, 8, 10, 1, 1, null, List.of()));
+            int[][] lights = {{4,4},{12,4},{4,12},{12,12}};
+            for (int i = 0; i < lights.length; i++) {
+                int x = lights[i][0], z = lights[i][1];
+                plots.add(terrainPlot(original, "lamp_" + i, x, z, 1, 1, x, z, 1, 1, null, List.of()));
+            }
+        } else if (original.name.equals("bandit_camp_large")) {
+            int[][] tents = {{3,6,7,6},{21,6,7,6},{4,20,7,6},{18,19,9,7}};
+            for (int i = 0; i < tents.length; i++) {
+                int x = tents[i][0], z = tents[i][1], w = tents[i][2], d = tents[i][3];
+                plots.add(terrainPlot(original, "tent_" + i, x, z, w, d, x, z, w, d,
+                    null, List.of(new Pos(x + w / 2, 6, z + d - 1))));
+            }
+            plots.add(terrainPlot(original, "lookout", 13, 3, 5, 5, 13, 3, 5, 5,
+                null, List.of(new Pos(15, 6, 7))));
+            plots.add(terrainPlot(original, "fire", 15, 17, 1, 1, 15, 17, 1, 1, null, List.of()));
+            plots.add(terrainPlot(original, "supplies", 23, 14, 3, 2, 23, 14, 3, 2, null, List.of()));
+            int[][] lights = {{5,4},{25,4},{5,15},{25,15},{7,27},{23,27},{15,23}};
+            for (int i = 0; i < lights.length; i++) {
+                int x = lights[i][0], z = lights[i][1];
+                if (insideGround(plots, x, z)) continue;
+                plots.add(terrainPlot(original, "lamp_" + i, x, z, 1, 1, x, z, 1, 1, null, List.of()));
+            }
+        } else if (original.name.equals("watchtower_small")) {
+            plots.add(terrainPlot(original, "tower_0", 0, 0, 9, 9, 0, 0, 9, 9, null,
+                List.of(new Pos(3, 6, 8), new Pos(4, 6, 8), new Pos(5, 6, 8))));
+        } else if (original.name.equals("watchtower_large")) {
+            plots.add(terrainPlot(original, "tower_0", 3, 3, 7, 7, 3, 3, 7, 7, null, List.of(new Pos(6, 6, 9))));
+            plots.add(terrainPlot(original, "tower_1", 19, 3, 7, 7, 19, 3, 7, 7, null, List.of(new Pos(22, 6, 9))));
+            plots.add(terrainPlot(original, "barracks", 4, 18, 11, 7, 4, 18, 11, 7, null, List.of(new Pos(9, 6, 18))));
+            plots.add(terrainPlot(original, "fletcher_house", 17, 18, 9, 7, 17, 18, 9, 7, null, List.of(new Pos(21, 6, 18))));
+            plots.add(terrainPlot(original, "charter", 13, 11, 4, 5, 13, 11, 4, 5, null, List.of()));
+            plots.add(terrainPlot(original, "quartermaster_post_0", 15, 16, 1, 1, 15, 16, 1, 1, v -> {}, List.of()));
+            plots.add(terrainPlot(original, "well", 22, 12, 3, 3, 22, 12, 3, 3, null, List.of()));
+            plots.add(terrainPlot(original, "market_stall_0", 5, 12, 5, 4, 5, 12, 5, 4, null, List.of()));
+            plots.add(terrainPlot(original, "guard_post_0", 15, 24, 1, 1, 15, 24, 1, 1, v -> {}, List.of()));
+            int[][] lights = {{9,10},{19,10},{5,25},{23,25},{14,4},{14,24},{3,15},{25,15}};
+            for (int i = 0; i < lights.length; i++) {
+                int x = lights[i][0], z = lights[i][1];
+                if (insideGround(plots, x, z)) continue;
+                plots.add(terrainPlot(original, "lamp_" + i, x, z, 1, 1, x, z, 1, 1, v -> lamp(v, x, z), List.of()));
+            }
         } else {
             int inset = hasWalls(original.name) ? 2 : 0;
             plots.add(terrainPlot(original, "site_core", 0, 0, original.width, original.depth,
@@ -184,6 +278,23 @@ public final class GenerateAssets {
             require(plots.stream().filter(plot -> contains(plot, (int) entity.x, (int) entity.z)).count() == 1,
                 original.name + ": missing or duplicated resident " + entity);
         }
+        for (TerrainPlot plot : plots) {
+            boolean exempt = original.name.equals("watchtower") || original.name.equals("watchtower_small");
+            require(exempt || plot.groundWidth <= 15 && plot.groundDepth <= 15,
+                original.name + "/" + plot.name + ": component footprint exceeds 15x15");
+            require(original.name.equals("watchtower_small") || !plot.name.equals("site_core"),
+                original.name + ": new layouts must be split into terrain components");
+        }
+        Set<Pos> occupied = new HashSet<>();
+        for (TerrainPlot plot : plots) {
+            for (int z = plot.z + plot.groundZ; z < plot.z + plot.groundZ + plot.groundDepth; z++) {
+                for (int x = plot.x + plot.groundX; x < plot.x + plot.groundX + plot.groundWidth; x++) {
+                    require(occupied.add(new Pos(x, 0, z)), original.name + ": overlapping terrain plot at " + x + "," + z);
+                }
+            }
+        }
+        Path componentRoot = data.resolve("structures").resolve("terrain").resolve(original.name);
+        deleteTree(componentRoot);
         for (TerrainPlot plot : plots) {
             plot.component.connectBarriers();
             writeVerified(data.resolve("structures").resolve(plot.component.name + ".nbt"), plot.component.template());
@@ -282,16 +393,7 @@ public final class GenerateAssets {
             + "    {\"structure\":\"" + NS + "terrain_bandit_camp_large\",\"weight\":1},\n"
             + "    {\"structure\":\"" + NS + "terrain_watchtower_small\",\"weight\":2},\n"
             + "    {\"structure\":\"" + NS + "terrain_watchtower\",\"weight\":1},\n"
-            + "    {\"structure\":\"" + NS + "terrain_watchtower_large\",\"weight\":1},\n"
-            + "    {\"structure\":\"" + NS + "terrain_fortified_hamlet\",\"weight\":2},\n"
-            + "    {\"structure\":\"" + NS + "terrain_fortified_hamlet\",\"weight\":2},\n"
-            + "    {\"structure\":\"" + NS + "terrain_bandit_camp\",\"weight\":1},\n"
-            + "    {\"structure\":\"" + NS + "terrain_bandit_camp\",\"weight\":1},\n"
-            + "    {\"structure\":\"" + NS + "terrain_bandit_camp\",\"weight\":1},\n"
-            + "    {\"structure\":\"" + NS + "terrain_watchtower\",\"weight\":1},\n"
-            + "    {\"structure\":\"" + NS + "terrain_watchtower\",\"weight\":1},\n"
-            + "    {\"structure\":\"" + NS + "terrain_watchtower\",\"weight\":1},\n"
-            + "    {\"structure\":\"" + NS + "terrain_watchtower\",\"weight\":1}\n  ],\n"
+            + "    {\"structure\":\"" + NS + "terrain_watchtower_large\",\"weight\":1}\n  ],\n"
             + "  \"placement\": {\"type\":\"minecraft:random_spread\",\"spacing\":12,\"separation\":4,"
             + "\"spread_type\":\"linear\",\"salt\":1650973021,\n"
             + "    \"exclusion_zone\":{\"other_set\":\"minecraft:villages\",\"chunk_count\":7}}\n}\n");
@@ -591,7 +693,7 @@ public final class GenerateAssets {
         Voxels v = settlement("hamlet_large", 49, 24);
         palisade(v, 1, 47, 1, 47, 23, 25, true);
         path(v, 23, 0, 25, 48); path(v, 2, 23, 46, 25); path(v, 12, 12, 36, 14); path(v, 12, 34, 36, 36);
-        customTower(v, 3, 3, 7, 10); customTower(v, 39, 3, 5, 8); customTower(v, 3, 39, 5, 8); customTower(v, 39, 39, 7, 12);
+        customTower(v, 3, 3, 7, 10); customTower(v, 41, 3, 5, 8); customTower(v, 3, 39, 5, 8); customTower(v, 39, 39, 7, 12);
         path(v, 6, 10, 23, 12); path(v, 24, 8, 41, 12); path(v, 5, 36, 23, 41); path(v, 25, 36, 42, 46);
         house(v, 5, 17, 11, 7, true, "red", 4, null, "tower_supplies");
         house(v, 18, 6, 13, 7, true, "green", 4, "lectern", "hamlet_supplies");
@@ -605,7 +707,7 @@ public final class GenerateAssets {
         house(v, 30, 38, 7, 7, false, "brown", 0, null, "hamlet_supplies");
         path(v, 31, 36, 35, 37);
         v.set(31, 6, 40, state("barrel", "facing", "up", "open", "false")); v.set(32, 6, 40, state("hay_block", "axis", "y"));
-        well(v, 23, 28); pen(v, 5, 8, 8, 6); farm(v, 29, 33); farm(v, 38, 9);
+        well(v, 23, 28); pen(v, 10, 3, 8, 6); path(v, 13, 9, 13, 12); farm(v, 29, 33); farm(v, 43, 9); path(v, 41, 10, 43, 10); path(v, 43, 8, 43, 10);
         v.fill(21, FLOOR, 20, 28, FLOOR, 27, state("stone_bricks"));
         board(v, 24, 20, false);
         v.set(24, 6, 26, COBBLE); v.set(24, 7, 26, state("bell", "attachment", "floor", "facing", "north", "powered", "false"));
@@ -673,7 +775,7 @@ public final class GenerateAssets {
         v.fill(11, FLOOR, 10, 17, FLOOR, 16, state("stone_bricks")); board(v, 14, 11, true);
         v.set(15, 6, 13, state("barrel", "facing", "up", "open", "false"));
         v.set(13, 6, 15, state("bell", "attachment", "floor", "facing", "north", "powered", "false"));
-        well(v, 22, 12); marketStall(v, 10, 17, "white");
+        well(v, 22, 12); marketStall(v, 5, 12, "white");
         for (int[] p : new int[][] {{9,10},{19,10},{5,25},{23,25},{14,4},{14,24},{3,15},{25,15}}) lamp(v, p[0], p[1]);
         v.mob("guard", 8.5, 12, 6.5, 30, true); v.mob("guard", 22.5, 12, 6.5, 30, true); v.mob("guard", 15.5, 6, 24.5, 30, false); v.mob("guard", 22.5, 6, 21.5, 30, false);
         v.mob("quartermaster", 15.5, 6, 16.5, 24, false); v.villager(21.5, 6, 21.5, "fletcher");
@@ -1228,6 +1330,15 @@ public final class GenerateAssets {
         }
     }
 
+    private static void deleteTree(Path path) throws IOException {
+        if (!Files.exists(path)) return;
+        try (var entries = Files.walk(path)) {
+            for (Path entry : entries.sorted(Comparator.reverseOrder()).toList()) {
+                Files.delete(entry);
+            }
+        }
+    }
+
     private static void writePayload(DataOutputStream out, Tag tag) throws IOException {
         switch (tag.type) {
             case 1 -> out.writeByte((Byte) tag.value);
@@ -1380,3 +1491,7 @@ public final class GenerateAssets {
         if (!condition) throw new IllegalStateException(message);
     }
 }
+
+
+
+

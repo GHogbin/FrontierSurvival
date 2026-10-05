@@ -6,7 +6,7 @@
   "spawn_overrides": {"monster":{"bounding_box":"piece","spawns":[]}},
   "width": 15,
   "plots": [
-    {"template":"frontiersurvival:terrain/watchtower_small/site_core","x":3,"z":3,"ground_x":0,"ground_z":0,"ground_width":9,"ground_depth":9,"entrances":[]}
+    {"template":"frontiersurvival:terrain/watchtower_small/tower_0","x":3,"z":3,"ground_x":0,"ground_z":0,"ground_width":9,"ground_depth":9,"entrances":[[3,8],[4,8],[5,8]]}
   ],
-  "paths": [[6,9],[7,9],[8,9],[6,12],[7,12],[8,12],[6,13],[7,13],[8,13],[6,14],[7,14],[8,14]]
+  "paths": [[6,9],[7,9],[8,9],[6,11],[7,11],[8,11],[6,12],[7,12],[8,12],[6,13],[7,13],[8,13],[6,14],[7,14],[8,14]]
 }
