@@ -1,0 +1,89 @@
+plugins {
+    id 'net.minecraftforge.gradle' version '6.0.54'
+}
+
+group = mod_group_id
+version = mod_version
+base.archivesName = 'frontier-survival-1.20.1-forge'
+// Keep transient compiler/game files out of OneDrive's file-locking sync path.
+if (System.getenv('LOCALAPPDATA')) {
+    layout.buildDirectory = new File(System.getenv('LOCALAPPDATA'),
+            "FrontierSurvival\\build\\${Integer.toHexString(projectDir.absolutePath.hashCode())}")
+}
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+java.withSourcesJar()
+
+sourceSets {
+    gametest {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+configurations.gametestImplementation.extendsFrom configurations.implementation
+configurations.gametestRuntimeOnly.extendsFrom configurations.runtimeOnly
+
+minecraft {
+    mappings channel: 'official', version: minecraft_version
+    runs {
+        configureEach {
+            workingDirectory layout.buildDirectory.dir("run/${name}").get().asFile
+            property 'forge.logging.console.level', 'info'
+            mods {
+                frontiersurvival {
+                    source sourceSets.main
+                }
+            }
+        }
+        client {}
+        server { args '--nogui' }
+        gameTestServer {
+            property 'forge.enabledGameTestNamespaces', 'frontiersurvival'
+            mods {
+                frontiersurvival {
+                    source sourceSets.gametest
+                }
+            }
+        }
+    }
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+}
+
+tasks.named('processResources', ProcessResources).configure {
+    inputs.property 'version', project.version
+    filesMatching('META-INF/mods.toml') { expand version: project.version }
+}
+tasks.named('jar', Jar).configure {
+    from('LICENSE')
+    manifest.attributes('Implementation-Title': 'Frontier Survival',
+                        'Implementation-Version': project.version)
+    finalizedBy 'reobfJar'
+}
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 17
+}
+tasks.matching { it.name == 'runGameTestServer' }.configureEach {
+    dependsOn tasks.named('gametestClasses')
+    doFirst { delete layout.buildDirectory.dir('run/gameTestServer/world') }
+}
+
+tasks.register('sourceBundle', Zip) {
+    includeEmptyDirs = false
+    archiveFileName = "frontier-survival-1.20.1-forge-${project.version}-source.zip"
+    destinationDirectory = layout.buildDirectory.dir('release')
+    from(projectDir) {
+        include 'src/**', 'tools/**', 'gradle/**', 'gradlew', 'gradlew.bat',
+                'build.gradle', 'settings.gradle', 'gradle.properties', 'Build.ps1', 'README.txt', 'LICENSE'
+    }
+}
+
+tasks.register('release', Copy) {
+    dependsOn tasks.named('build'), tasks.named('sourceBundle'), tasks.named('reobfJar')
+    into layout.projectDirectory.dir('dist')
+    from(tasks.named('jar'))
+    from(tasks.named('sourceBundle'))
+    from('README.txt')
+}

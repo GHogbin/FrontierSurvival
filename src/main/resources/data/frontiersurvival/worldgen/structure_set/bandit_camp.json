@@ -1,0 +1,12 @@
+{
+  "structures": [
+    { "structure": "frontiersurvival:bandit_camp", "weight": 1 }
+  ],
+  "placement": {
+    "type": "minecraft:random_spread",
+    "spacing": 28,
+    "separation": 10,
+    "spread_type": "linear",
+    "salt": 962830147
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "structures": [
+    { "structure": "frontiersurvival:fortified_hamlet", "weight": 1 }
+  ],
+  "placement": {
+    "type": "minecraft:random_spread",
+    "spacing": 32,
+    "separation": 12,
+    "spread_type": "linear",
+    "salt": 735194021
+  }
+}

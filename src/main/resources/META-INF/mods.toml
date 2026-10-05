@@ -1,0 +1,24 @@
+modLoader="javafml"
+loaderVersion="[47,48)"
+license="MIT"
+
+[[mods]]
+modId="frontiersurvival"
+version="${version}"
+displayName="Frontier Survival"
+authors="Graham"
+description='''An independent survival frontier: defended hamlets, wilderness watchtowers, bandit camps, village guards and persistent settlement reputation.'''
+
+[[dependencies.frontiersurvival]]
+modId="forge"
+mandatory=true
+versionRange="[47.4.0,48)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.frontiersurvival]]
+modId="minecraft"
+mandatory=true
+versionRange="[1.20.1]"
+ordering="NONE"
+side="BOTH"
