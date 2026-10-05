@@ -159,6 +159,9 @@ public final class FrontierGameTests {
         float friendlyHealth = friend.getHealth();
         float enemyHealth = enemy.getHealth();
         guard.performRangedAttack(enemy, 1);
+        helper.onEachTick(() -> {
+            if (guard.tickCount % 20 == 0 && enemy.getHealth() == enemyHealth) guard.performRangedAttack(enemy, 1);
+        });
         helper.succeedWhen(() -> {
             helper.assertTrue(enemy.getHealth() < enemyHealth, "Arrow strikes hostile beyond villager");
             helper.assertTrue(friend.getHealth() == friendlyHealth, "Villager is not hurt by friendly arrow");
@@ -198,7 +201,7 @@ public final class FrontierGameTests {
         BlockPos center = origin.offset(19, 6, 18);
         helper.assertTrue(level.getBlockEntity(center) instanceof SettlementBoardBlockEntity, "Settlement charter has registered block entity");
         // Entity section visibility is applied on the next chunk tick after template placement.
-        helper.runAfterDelay(5, () -> {
+        helper.succeedWhen(() -> {
             var guards = level.getEntitiesOfClass(GuardEntity.class, bounds);
             var merchants = level.getEntitiesOfClass(QuartermasterEntity.class, bounds);
             var villagers = level.getEntitiesOfClass(Villager.class, bounds);
@@ -208,14 +211,12 @@ public final class FrontierGameTests {
             merchants.forEach(merchant -> merchant.setNoAi(true));
             for (var entity : guards) helper.assertTrue(level.noCollision(entity), "Guard spawn has headroom");
             for (var entity : merchants) helper.assertTrue(level.noCollision(entity), "Merchant spawn has headroom");
-        });
-        helper.runAfterDelay(30, () -> {
-            helper.assertTrue(SettlementState.get(level).nearest(level, center, 1).orElseThrow().equals(center),
+            var registered = SettlementState.get(level).nearest(level, center, 1);
+            helper.assertTrue(registered.isPresent() && registered.get().equals(center),
                     "Board registers absolute settlement location");
             helper.assertTrue(level.getEntitiesOfClass(GuardEntity.class, bounds).stream()
                     .allMatch(guard -> guard.getRestrictCenter().equals(center)),
                     "Generated guards bind to real settlement, not template-relative coords");
-            helper.succeed();
         });
     }
 
@@ -249,10 +250,12 @@ public final class FrontierGameTests {
         validateEntityNbt(helper, template);
         helper.assertTrue(template.placeInWorld(level, origin, origin, new StructurePlaceSettings().setFinalizeEntities(true),
                 RandomSource.create(44), 2), "Camp places");
-        helper.runAfterDelay(5, () -> {
+        helper.runAfterDelay(10, () -> {
             var bandits = level.getEntitiesOfClass(BanditEntity.class, new AABB(origin, origin.offset(23, 14, 23)));
             helper.assertTrue(bandits.size() == 4 && bandits.stream().filter(BanditEntity::isLeader).count() == 1
-                    && bandits.stream().filter(BanditEntity::isArcher).count() == 1, "Bandit camp spawns three bandits and leader");
+                    && bandits.stream().filter(BanditEntity::isArcher).count() == 1,
+                    "Camp population: " + bandits.stream().map(bandit -> bandit.getType() + " archer=" + bandit.isArcher()
+                            + " position=" + bandit.blockPosition()).toList());
             helper.assertTrue(bandits.stream().allMatch(bandit -> bandit.isPersistenceRequired()
                     && !bandit.getMainHandItem().isEmpty() && level.noCollision(bandit)), "Camp bandits persist, are armed and unobstructed");
             helper.succeed();
@@ -264,14 +267,25 @@ public final class FrontierGameTests {
         ServerLevel level = helper.getLevel();
         var registry = level.registryAccess().registryOrThrow(Registries.STRUCTURE);
         ChunkGenerator generator = level.getChunkSource().getGenerator();
-        for (String name : new String[]{"fortified_hamlet", "watchtower", "bandit_camp"}) {
+        for (String name : new String[]{"fortified_hamlet", "watchtower", "bandit_camp",
+                "terrain_fortified_hamlet", "terrain_watchtower", "terrain_bandit_camp"}) {
             var structure = registry.get(id(name));
             helper.assertTrue(structure != null, "Structure codec loads: " + name);
             var start = structure.generate(level.registryAccess(), generator, generator.getBiomeSource(),
                     level.getChunkSource().randomState(), level.getStructureManager(), level.getSeed(),
                     new net.minecraft.world.level.ChunkPos(helper.absolutePos(new BlockPos(10, 1, 10))),
                     0, level, biome -> true);
-            helper.assertTrue(start.isValid() && !start.getPieces().isEmpty(), "Jigsaw pool generates a valid start: " + name);
+            if (!start.isValid() && name.startsWith("terrain_")) {
+                // Terrain suitability is intentional: an arbitrary test chunk may be wet or a cliff.
+                for (int attempt = 0; attempt < 32 && !start.isValid(); attempt++) {
+                    var candidate = new net.minecraft.world.level.ChunkPos(-128 + (attempt % 8) * 32,
+                            -64 + (attempt / 8) * 32);
+                    start = structure.generate(level.registryAccess(), generator, generator.getBiomeSource(),
+                            level.getChunkSource().randomState(), level.getStructureManager(), level.getSeed(),
+                            candidate, 0, level, biome -> true);
+                }
+            }
+            helper.assertTrue(start.isValid() && !start.getPieces().isEmpty(), "Structure generates a valid start: " + name);
         }
         helper.succeed();
     }

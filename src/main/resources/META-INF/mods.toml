@@ -7,7 +7,7 @@ modId="frontiersurvival"
 version="${version}"
 displayName="Frontier Survival"
 authors="Graham"
-description='''An independent survival frontier: defended hamlets, wilderness watchtowers, bandit camps, village guards and persistent settlement reputation.'''
+description='''An independent survival frontier: terrain-following defended hamlets, wilderness watchtowers, bandit camps, village guards and persistent settlement reputation.'''
 
 [[dependencies.frontiersurvival]]
 modId="forge"

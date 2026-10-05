@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.Consumer;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 import javax.imageio.ImageIO;
@@ -55,6 +56,7 @@ public final class GenerateAssets {
             Path file = data.resolve("structures").resolve(voxels.name + ".nbt");
             writeVerified(file, voxels.template());
             voxels.report(file);
+            generateTerrain(data, voxels);
         }
         Voxels arena = new Voxels("test/arena", 48, 24, 48);
         arena.fill(0, 0, 0, 47, 0, 47, state("grass_block", "snowy", "false"));
@@ -84,6 +86,196 @@ public final class GenerateAssets {
             System.out.println("Skin " + file + ": original 64 x 64, standard wide-arm humanoid UV.");
         }
         System.out.println("All geometry, populations, NBT round-trips and PNG round-trips passed.");
+    }
+
+    private record TerrainPlot(String name, int x, int z, int groundX, int groundZ,
+                               int groundWidth, int groundDepth, Voxels component, List<Pos> entrances) {}
+
+    private static void generateTerrain(Path data, Voxels original) throws IOException {
+        List<TerrainPlot> plots = new ArrayList<>();
+        if (original.name.equals("fortified_hamlet")) {
+            for (int i = 0; i < 2; i++) {
+                int x = i == 0 ? 3 : 29;
+                plots.add(terrainPlot(original, "tower_" + i, x - 1, 2, 9, 9, x, 3, 7, 7,
+                    v -> roofedTower(v, x, 3), List.of(new Pos(x + 3, 6, 9))));
+            }
+            for (int i = 0; i < 4; i++) {
+                int x = i % 2 == 0 ? 4 : 26;
+                int z = i < 2 ? 11 : 24;
+                boolean south = i < 2;
+                String color = List.of("blue", "cyan", "yellow", "green").get(i);
+                String job = List.of("composter", "fletching_table", "smithing_table", "stonecutter").get(i);
+                plots.add(terrainPlot(original, "cottage_" + i, x - 1, z - 1, 11, 9, x, z, 9, 7,
+                    v -> cottage(v, x, z, south, color, job),
+                    List.of(new Pos(x + 4, 6, south ? z + 6 : z))));
+            }
+            plots.add(terrainPlot(original, "market", 16, 16, 7, 7, 16, 16, 7, 7, v -> {
+                v.fill(16, FLOOR, 16, 22, FLOOR, 22, state("stone_bricks"));
+                board(v, 19, 18, false);
+                v.set(19, 6, 21, COBBLE);
+                v.set(19, 7, 21, state("bell", "attachment", "floor", "facing", "north", "powered", "false"));
+            }, List.of()));
+            for (int i = 0; i < 2; i++) {
+                int x = i == 0 ? 14 : 22;
+                plots.add(terrainPlot(original, "farm_" + i, x - 1, 24, 5, 11, x - 1, 24, 5, 11,
+                    v -> farm(v, x, 25), List.of()));
+            }
+            int[][] lights = {{16,8},{22,8},{16,16},{22,22},{16,35},{22,35},{3,21},{35,21},{17,2},{21,36}};
+            for (int i = 0; i < lights.length; i++) {
+                int x = lights[i][0], z = lights[i][1];
+                if (insideGround(plots, x, z)) {
+                    TerrainPlot owner = plots.stream().filter(plot -> contains(plot, x, z)).findFirst().orElseThrow();
+                    // These two market lamps share the market's rigid floor instead of claiming overlapping plots.
+                    owner.component.set(x - owner.x, 1, z - owner.z, FENCE);
+                    owner.component.set(x - owner.x, 2, z - owner.z, FENCE);
+                    owner.component.set(x - owner.x, 3, z - owner.z,
+                        state("lantern", "hanging", "false", "waterlogged", "false"));
+                } else {
+                    plots.add(terrainPlot(original, "lamp_" + i, x, z, 1, 1, x, z, 1, 1,
+                        v -> lamp(v, x, z), List.of()));
+                }
+            }
+            plots.add(terrainPlot(original, "guard_post_0", 18, 10, 1, 1, 18, 10, 1, 1, v -> {}, List.of()));
+            plots.add(terrainPlot(original, "guard_post_1", 20, 32, 1, 1, 20, 32, 1, 1, v -> {}, List.of()));
+        } else if (original.name.equals("watchtower")) {
+            // One small attached outpost, with shallow supports and a strict local relief limit.
+            plots.add(terrainPlot(original, "tower_0", 0, 0, 13, 13, 0, 0, 13, 13, null, List.of()));
+        } else if (original.name.equals("bandit_camp")) {
+            int[][] tents = {{3,4},{13,4},{13,13}};
+            for (int i = 0; i < tents.length; i++) {
+                int x = tents[i][0], z = tents[i][1];
+                String cloth = List.of("brown", "light_gray", "gray").get(i);
+                String stripe = i == 0 ? "orange" : "red";
+                plots.add(terrainPlot(original, "tent_" + i, x, z, 7, 6, x, z, 7, 6,
+                    v -> tent(v, x, z, cloth, stripe), List.of(new Pos(x + 3, 6, z + 5))));
+            }
+            plots.add(terrainPlot(original, "fire", 10, 11, 3, 3, 10, 11, 3, 3, v -> {
+                for (int x = 10; x <= 12; x++) for (int z = 11; z <= 13; z++) {
+                    Placed block = original.blocks.get(new Pos(x, 6, z));
+                    v.set(x, 6, z, block.state, block.nbt);
+                }
+            }, List.of()));
+            plots.add(terrainPlot(original, "guard_post_0", 6, 16, 1, 1, 6, 16, 1, 1, v -> {}, List.of()));
+            int[][] lights = {{10,3},{12,3},{3,12},{19,12},{9,18},{13,20}};
+            for (int i = 0; i < lights.length; i++) {
+                int x = lights[i][0], z = lights[i][1];
+                plots.add(terrainPlot(original, "lamp_" + i, x, z, 1, 1, x, z, 1, 1, v -> {
+                    v.fill(x, 6, z, x, 7, z, FENCE);
+                    v.set(x, 8, z, state("torch"));
+                }, List.of()));
+            }
+        } else throw new IllegalArgumentException("Unknown original terrain layout " + original.name);
+
+        require(plots.stream().mapToInt(plot -> plot.component.entities.size()).sum() == original.entities.size(),
+            original.name + ": terrain components must assign every original resident exactly once");
+        for (Entity entity : original.entities) {
+            require(plots.stream().filter(plot -> contains(plot, (int) entity.x, (int) entity.z)).count() == 1,
+                original.name + ": missing or duplicated resident " + entity);
+        }
+        for (TerrainPlot plot : plots) {
+            plot.component.connectBarriers();
+            writeVerified(data.resolve("structures").resolve(plot.component.name + ".nbt"), plot.component.template());
+        }
+        Set<Pos> paths = new HashSet<>();
+        for (Pos pos : original.paths) {
+            if (original.accessible(pos)) paths.add(new Pos(pos.x, 0, pos.z));
+        }
+        for (TerrainPlot plot : plots) {
+            for (Pos entrance : plot.entrances) paths.add(new Pos(plot.x + entrance.x, 0, plot.z + entrance.z));
+        }
+        StringBuilder json = new StringBuilder("{\n  \"type\": \"frontiersurvival:terrain_settlement\",\n");
+        json.append("  \"biomes\": \"#frontiersurvival:has_structure/").append(original.name).append("\",\n")
+            .append("  \"step\": \"surface_structures\",\n  \"terrain_adaptation\": \"none\",\n")
+            .append("  \"spawn_overrides\": ").append(original.name.equals("bandit_camp") ? "{}" :
+                "{\"monster\":{\"bounding_box\":\"piece\",\"spawns\":[]}}").append(",\n")
+            .append("  \"width\": ").append(original.width).append(",\n  \"plots\": [\n");
+        for (int i = 0; i < plots.size(); i++) {
+            TerrainPlot plot = plots.get(i);
+            json.append("    {\"template\":\"").append(NS).append(plot.component.name).append("\",\"x\":")
+                .append(plot.x).append(",\"z\":").append(plot.z).append(",\"ground_x\":").append(plot.groundX)
+                .append(",\"ground_z\":").append(plot.groundZ).append(",\"ground_width\":").append(plot.groundWidth)
+                .append(",\"ground_depth\":").append(plot.groundDepth).append(",\"entrances\":[");
+            for (int e = 0; e < plot.entrances.size(); e++) {
+                Pos entrance = plot.entrances.get(e);
+                if (e > 0) json.append(',');
+                json.append('[').append(entrance.x).append(',').append(entrance.z).append(']');
+            }
+            json.append("]}").append(i + 1 < plots.size() ? "," : "").append('\n');
+        }
+        json.append("  ],\n  \"paths\": [");
+        List<Pos> ordered = paths.stream().sorted(Comparator.comparingInt(Pos::z).thenComparingInt(Pos::x)).toList();
+        for (int i = 0; i < ordered.size(); i++) {
+            if (i > 0) json.append(',');
+            Pos pos = ordered.get(i);
+            json.append('[').append(pos.x).append(',').append(pos.z).append(']');
+        }
+        json.append(']');
+        if (!original.name.equals("watchtower")) {
+            boolean hamlet = original.name.equals("fortified_hamlet");
+            json.append(",\n  \"walls\":{\"min\":1,\"max\":").append(original.width - 2)
+                .append(",\"gate_start\":").append(hamlet ? 18 : 10)
+                .append(",\"gate_end\":").append(hamlet ? 20 : 12)
+                .append(",\"north_gate\":").append(hamlet).append('}');
+        }
+        json.append("\n}\n");
+        Files.writeString(data.resolve("worldgen").resolve("structure").resolve("terrain_" + original.name + ".json"), json);
+        int spacing = original.width == 39 ? 32 : original.width == 13 ? 24 : 28;
+        int separation = original.width == 39 ? 12 : original.width == 13 ? 8 : 10;
+        int salt = original.width == 39 ? 735194021 : original.width == 13 ? 418907563 : 962830147;
+        Files.writeString(data.resolve("worldgen").resolve("structure_set").resolve(original.name + ".json"),
+            "{\n  \"structures\": [{\"structure\":\"" + NS + "terrain_" + original.name + "\",\"weight\":1}],\n"
+            + "  \"placement\":{\"type\":\"minecraft:random_spread\",\"spacing\":" + spacing
+            + ",\"separation\":" + separation + ",\"spread_type\":\"linear\",\"salt\":" + salt + "}\n}\n");
+        System.out.println("Terrain " + original.name + ": " + plots.size() + " grounded plots, " + paths.size()
+            + " graded path cells; legacy template preserved.");
+    }
+
+    private static boolean insideGround(List<TerrainPlot> plots, int x, int z) {
+        return plots.stream().anyMatch(plot -> contains(plot, x, z));
+    }
+
+    private static boolean contains(TerrainPlot plot, int x, int z) {
+        return x >= plot.x + plot.groundX && x < plot.x + plot.groundX + plot.groundWidth
+            && z >= plot.z + plot.groundZ && z < plot.z + plot.groundZ + plot.groundDepth;
+    }
+
+    private static TerrainPlot terrainPlot(Voxels original, String name, int x, int z, int width, int depth,
+            int groundX, int groundZ, int groundWidth, int groundDepth, Consumer<Voxels> draw, List<Pos> entrances) {
+        Voxels canvas;
+        if (draw == null) canvas = original;
+        else {
+            canvas = new Voxels(name, original.width, original.height, original.depth);
+            canvas.fill(groundX, FLOOR, groundZ, groundX + groundWidth - 1, FLOOR,
+                groundZ + groundDepth - 1, state("grass_block", "snowy", "false"));
+            draw.accept(canvas);
+        }
+        int top = Math.max(FLOOR + 2, canvas.blocks.values().stream()
+            .filter(block -> block.pos.x >= x && block.pos.x < x + width && block.pos.z >= z && block.pos.z < z + depth
+                && !block.state.equals(AIR)).mapToInt(block -> block.pos.y).max().orElse(FLOOR));
+        List<Entity> residents = original.entities.stream().filter(entity ->
+            entity.x >= groundX && entity.x < groundX + groundWidth && entity.z >= groundZ && entity.z < groundZ + groundDepth).toList();
+        for (Entity resident : residents) top = Math.max(top, (int) Math.ceil(resident.y + 1.95));
+        // Reserve room for the two market lamps added after component construction.
+        if (name.equals("market")) top = Math.max(top, FLOOR + 3);
+        Voxels part = new Voxels("terrain/" + original.name + "/" + name, width, top - FLOOR + 1, depth);
+        part.blocks.clear();
+        for (int zz = z; zz < z + depth; zz++) for (int xx = x; xx < x + width; xx++) {
+            boolean core = xx >= groundX && xx < groundX + groundWidth && zz >= groundZ && zz < groundZ + groundDepth;
+            for (int yy = FLOOR; yy <= top; yy++) {
+                Placed source = canvas.blocks.get(new Pos(xx, yy, zz));
+                if (!core && (yy == FLOOR || source.state.equals(AIR))) continue;
+                part.set(xx - x, yy - FLOOR, zz - z, source.state, source.nbt);
+            }
+        }
+        for (Entity resident : residents) {
+            double px = resident.x - x, py = resident.y - FLOOR, pz = resident.z - z;
+            Map<String, Tag> nbt = new LinkedHashMap<>(asCompound(resident.nbt));
+            nbt.put("Pos", doubles(px, py, pz));
+            part.entities.add(new Entity(resident.id, px, py, pz, new Tag((byte) 10, nbt)));
+            require(part.accessible(new Pos((int) px, (int) py, (int) pz)), "Terrain resident lacks a usable floor");
+        }
+        return new TerrainPlot(name, x, z, groundX - x, groundZ - z, groundWidth, groundDepth, part,
+            entrances.stream().map(pos -> new Pos(pos.x - x, 1, pos.z - z)).toList());
     }
 
     private static Voxels hamlet() {

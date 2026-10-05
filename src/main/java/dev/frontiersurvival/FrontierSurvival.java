@@ -7,6 +7,7 @@ import dev.frontiersurvival.entity.GuardEntity;
 import dev.frontiersurvival.entity.QuartermasterEntity;
 import dev.frontiersurvival.settlement.SettlementBoardBlock;
 import dev.frontiersurvival.settlement.SettlementBoardBlockEntity;
+import dev.frontiersurvival.worldgen.TerrainTypes;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobCategory;
 import net.minecraft.world.entity.SpawnPlacements;
@@ -75,11 +76,12 @@ public final class FrontierSurvival {
         ITEMS.register(bus);
         BLOCKS.register(bus);
         BLOCK_ENTITIES.register(bus);
+        TerrainTypes.register(bus);
         bus.addListener(FrontierSurvival::attributes);
         bus.addListener(FrontierSurvival::spawns);
         bus.addListener(FrontierSurvival::creativeTab);
         context.registerConfig(ModConfig.Type.COMMON, FrontierConfig.SPEC);
-        LOGGER.info("Frontier Survival 0.1.0: independent Forge survival frontier");
+        LOGGER.info("Frontier Survival: independently grounded buildings and graded settlement terrain");
     }
 
     private static void attributes(EntityAttributeCreationEvent event) {

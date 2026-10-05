@@ -67,7 +67,20 @@ tasks.withType(JavaCompile).configureEach {
 }
 tasks.matching { it.name == 'runGameTestServer' }.configureEach {
     dependsOn tasks.named('gametestClasses')
-    doFirst { delete layout.buildDirectory.dir('run/gameTestServer/world') }
+    def completionLog = layout.buildDirectory.file('run/gameTestServer/logs/latest.log')
+    doFirst {
+        delete layout.buildDirectory.dir('run/gameTestServer/world')
+        delete completionLog
+    }
+    doLast {
+        // Forge 47 can exit zero after a registry-loading failure without running any tests.
+        def log = completionLog.get().asFile
+        if (!log.isFile()
+                || !(log.getText('UTF-8') =~ /[1-9][0-9]* GAME TESTS COMPLETE/).find()
+                || !(log.getText('UTF-8') =~ /All [1-9][0-9]* required tests passed/).find()) {
+            throw new GradleException('GameTests did not finish successfully; see the gameTestServer log.')
+        }
+    }
 }
 
 tasks.register('sourceBundle', Zip) {

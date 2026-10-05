@@ -1,8 +1,8 @@
 FRONTIER SURVIVAL - INDEPENDENT MVP
-Version 0.1.0 | Minecraft Java 1.20.1 | Forge 47.4.0 | Java 17
+Version 0.1.1 | Minecraft Java 1.20.1 | Forge 47.4.0 | Java 17
 
 INSTALL
-Put frontier-survival-1.20.1-forge-0.1.0.jar in the mods folder of your
+Put frontier-survival-1.20.1-forge-0.1.1.jar in the mods folder of your
 Minecraft Java 1.20.1 / Forge 47.4.0 instance and restart the game.
 Install the same JAR on both clients and server for multiplayer.
 No other mod libraries are required. This is NOT Fabric, NeoForge or Bedrock.
@@ -17,6 +17,26 @@ chunks in a 1.20.1 save: already generated villages/chunks are not rebuilt.
 Never open a world from a newer Minecraft version in 1.20.1.
 Do not remove the mod from saves containing its entities/charter blocks
 without a backup.
+
+TERRAIN FIX IN 0.1.1
+New hamlets and camps place cottages, towers, markets, farms and tents at
+independent local ground heights instead of on a single floating slab.
+Rooms, roofs, beds and ladders remain rigid and level. Only small building
+footprints receive foundations; the surrounding ground is not flattened.
+Paths follow a saved, graded ground profile with at most one-block steps
+between neighboring path cells and level door approaches. Hamlet/camp
+palisades step with the surrounding terrain. The compact watchtower outpost
+uses one locally grounded footprint with shallow supports.
+
+Unsuitable water-covered sites, cliffs, steep building footprints and
+impossible approaches are skipped rather than generated in mid-air.
+All sampled elevations and supports are saved before individual chunks
+are placed, so loading/generation order cannot change their heights.
+
+Replace the old JAR; never install both versions. Existing structures are
+NOT rebuilt or moved. Old templates and structure IDs remain registered
+for partially generated 0.1.0 structures. Only newly generated starts use
+the new terrain structure IDs below. Explore NEW chunks or use a new world.
 
 THE FIVE MVP FEATURES
 1. Guards: original blue-uniform melee and bow defenders. 30 health.
@@ -75,9 +95,9 @@ COMMANDS
 Both are available without cheats.
 
 In a cheats-enabled test world:
-/locate structure frontiersurvival:fortified_hamlet
-/locate structure frontiersurvival:watchtower
-/locate structure frontiersurvival:bandit_camp
+/locate structure frontiersurvival:terrain_fortified_hamlet
+/locate structure frontiersurvival:terrain_watchtower
+/locate structure frontiersurvival:terrain_bandit_camp
 Use the returned coordinates to travel/teleport. Structures have biome
 restrictions and placement grids, so they may be a considerable walk away.
 Creative spawn eggs are in the Spawn Eggs tab.
@@ -85,9 +105,10 @@ Creative spawn eggs are in the Spawn Eggs tab.
 LIMITS
 First MVP, not the full long-term concept. No caravans, quests, diseases,
 fatigue, new professions, siege events, mounted guards, reputation housing
-or timed gates yet. One original layout per structure type. Terrain
-adaptation and buried foundations help placement but do not flatten entire
-hillsides. Hands-on balance and client/multiplayer playtesting are still
+or timed gates yet. One original layout per structure type, fixed orientation.
+Sites require at most three blocks of relief per building footprint and
+twelve across the settlement; path earthworks are bounded to three blocks.
+Hands-on balance and client/multiplayer playtesting are still
 needed. Guards, merchants and camp inhabitants are not automatically
 resurrected. Peaceful removes hostile bandits, including camp inhabitants.
 There is no forced chunk loading, terrain rebuilding or old-mod migration.

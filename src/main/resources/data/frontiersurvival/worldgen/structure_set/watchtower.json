@@ -1,12 +1,4 @@
 {
-  "structures": [
-    { "structure": "frontiersurvival:watchtower", "weight": 1 }
-  ],
-  "placement": {
-    "type": "minecraft:random_spread",
-    "spacing": 24,
-    "separation": 8,
-    "spread_type": "linear",
-    "salt": 418907563
-  }
+  "structures": [{"structure":"frontiersurvival:terrain_watchtower","weight":1}],
+  "placement":{"type":"minecraft:random_spread","spacing":24,"separation":8,"spread_type":"linear","salt":418907563}
 }
