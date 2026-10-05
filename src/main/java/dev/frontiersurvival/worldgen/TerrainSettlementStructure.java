@@ -3,24 +3,26 @@ package dev.frontiersurvival.worldgen;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongArrayList;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
+import java.util.Optional;
+import java.util.TreeMap;
+import java.util.WeakHashMap;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.QuartPos;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.tags.BlockTags;
 import net.minecraft.util.RandomSource;
-import net.minecraft.world.level.NoiseColumn;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructureType;
-import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
+import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager;
 
 public final class TerrainSettlementStructure extends Structure {
@@ -33,6 +35,11 @@ public final class TerrainSettlementStructure extends Structure {
                     TerrainPlanner.Walls.CODEC.optionalFieldOf("walls").forGetter(TerrainSettlementStructure::walls)
             ).apply(instance, TerrainSettlementStructure::new)).flatXmap(
                     TerrainSettlementStructure::validate, TerrainSettlementStructure::validate).codec();
+
+    /** Candidate sites around the start chunk, nearest first; the lowest-earthworks valid site wins. */
+    private static final int[][] SITE_OFFSETS = {
+            {0, 0}, {12, 0}, {-12, 0}, {0, 12}, {0, -12}, {12, 12}, {-12, 12}, {12, -12}, {-12, -12}};
+    private static final Map<StructureTemplate, Shape> SHAPES = Collections.synchronizedMap(new WeakHashMap<>());
 
     private final int width;
     private final List<TerrainPlanner.Plot> plots;
@@ -59,37 +66,17 @@ public final class TerrainSettlementStructure extends Structure {
                 : DataResult.error(() -> "Invalid or overlapping terrain settlement footprint");
     }
 
+    private record Site(int originX, int originZ, TerrainPlanner.Plan plan, int earthworks) {}
+
     @Override
     protected Optional<GenerationStub> findGenerationPoint(GenerationContext context) {
-        int originX = context.chunkPos().getMinBlockX() + 8 - width / 2;
-        int originZ = context.chunkPos().getMinBlockZ() + 8 - width / 2;
-        TerrainPlanner.Sample[] samples = new TerrainPlanner.Sample[width * width];
-        TerrainPlanner.Sampler sampler = (x, z) -> {
-            int index = z * width + x;
-            if (samples[index] == null) samples[index] = sample(context, originX + x, originZ + z);
-            return samples[index];
-        };
-        if (!preflight(context, sampler)) return Optional.empty();
-        Optional<TerrainPlanner.Plan> candidate = TerrainPlanner.plan(width, plots, paths, walls,
-                sampler,
-                context.heightAccessor().getMinBuildHeight(), context.heightAccessor().getMaxBuildHeight());
-        if (candidate.isEmpty()) return Optional.empty();
-        TerrainPlanner.Plan plan = candidate.get();
-        for (TerrainPlanner.Building building : plan.buildings()) {
-            TerrainPlanner.Plot plot = building.plot();
-            Optional<StructureTemplate> found = context.structureTemplateManager().get(plot.template());
-            if (found.isEmpty()) throw new IllegalStateException("Missing terrain component " + plot.template());
-            var size = found.get().getSize();
-            if (size.getY() < 2 || plot.x() + size.getX() > width || plot.z() + size.getZ() > width
-                    || plot.groundX() + plot.groundWidth() > size.getX()
-                    || plot.groundZ() + plot.groundDepth() > size.getZ()
-                    || building.floorY() + size.getY() > context.heightAccessor().getMaxBuildHeight()) {
-                return Optional.empty();
-            }
-        }
-        if (!geometryFits(plan, context.structureTemplateManager())) return Optional.empty();
-        BlockPos origin = new BlockPos(originX, 0, originZ);
-        BlockPos center = new BlockPos(originX + width / 2, plan.ground(width / 2, width / 2), originZ + width / 2);
+        Optional<Site> chosen = chooseSite(context, null);
+        if (chosen.isEmpty()) return Optional.empty();
+        Site best = chosen.get();
+        TerrainPlanner.Plan plan = best.plan();
+        BlockPos origin = new BlockPos(best.originX(), 0, best.originZ());
+        BlockPos center = new BlockPos(best.originX() + width / 2, plan.ground(width / 2, width / 2),
+                best.originZ() + width / 2);
         return Optional.of(new GenerationStub(center, builder -> {
             builder.addPiece(new TerrainGroundPiece(origin, plan));
             for (TerrainPlanner.Building building : plan.buildings()) {
@@ -98,69 +85,147 @@ public final class TerrainSettlementStructure extends Structure {
         }));
     }
 
+    /** Counts why each nearby candidate site was accepted or rejected; used to tune natural frequency. */
+    public Map<String, Integer> diagnose(GenerationContext context) {
+        Map<String, Integer> reasons = new TreeMap<>();
+        chooseSite(context, reasons);
+        return reasons;
+    }
+
+    private Optional<Site> chooseSite(GenerationContext context, Map<String, Integer> reasons) {
+        TerrainSampler terrain = new TerrainSampler(context);
+        int centerX = context.chunkPos().getMiddleBlockX();
+        int centerZ = context.chunkPos().getMiddleBlockZ();
+        // Vanilla checks the biome only after placement is found; rejecting first avoids sampling unusable regions.
+        if (!biomeAllows(context, terrain, centerX, centerZ)) {
+            count(reasons, "biome");
+            return Optional.empty();
+        }
+        int minY = context.heightAccessor().getMinBuildHeight();
+        int maxY = context.heightAccessor().getMaxBuildHeight();
+        Site best = null;
+        for (int[] offset : SITE_OFFSETS) {
+            int originX = centerX + offset[0] - width / 2;
+            int originZ = centerZ + offset[1] - width / 2;
+            if ((offset[0] != 0 || offset[1] != 0) && !biomeAllows(context, terrain, originX + width / 2, originZ + width / 2)) {
+                count(reasons, "offset-biome");
+                continue;
+            }
+            TerrainPlanner.Sampler sampler = (x, z) -> terrain.sample(originX + x, originZ + z);
+            String early = preflight(sampler, minY, maxY);
+            if (early != null) {
+                count(reasons, early);
+                continue;
+            }
+            TerrainPlanner.Evaluation evaluation = TerrainPlanner.evaluate(width, plots, paths, walls, sampler, minY, maxY);
+            if (evaluation.plan().isEmpty()) {
+                count(reasons, evaluation.rejection());
+                continue;
+            }
+            TerrainPlanner.Plan plan = evaluation.plan().get();
+            if (!templatesFit(plan, context)) {
+                count(reasons, "template-fit");
+                continue;
+            }
+            if (!geometryFits(plan, context.structureTemplateManager())) {
+                count(reasons, "geometry");
+                continue;
+            }
+            count(reasons, "valid");
+            int earthworks = plan.earthworks();
+            if (best == null || earthworks < best.earthworks()) best = new Site(originX, originZ, plan, earthworks);
+        }
+        return Optional.ofNullable(best);
+    }
+
+    private static void count(Map<String, Integer> reasons, String reason) {
+        if (reasons != null) reasons.merge(reason, 1, Integer::sum);
+    }
+
+    private static boolean biomeAllows(GenerationContext context, TerrainSampler terrain, int x, int z) {
+        TerrainPlanner.Sample sample = terrain.sample(x, z);
+        if (!sample.solid()) return false;
+        return context.validBiome().test(context.biomeSource().getNoiseBiome(QuartPos.fromBlock(x),
+                QuartPos.fromBlock(sample.groundY()), QuartPos.fromBlock(z), context.randomState().sampler()));
+    }
+
+    private boolean templatesFit(TerrainPlanner.Plan plan, GenerationContext context) {
+        for (TerrainPlanner.Building building : plan.buildings()) {
+            TerrainPlanner.Plot plot = building.plot();
+            StructureTemplate template = context.structureTemplateManager().get(plot.template()).orElseThrow(
+                    () -> new IllegalStateException("Missing terrain component " + plot.template()));
+            var size = template.getSize();
+            if (size.getY() < 2 || plot.x() + size.getX() > width || plot.z() + size.getZ() > width
+                    || plot.groundX() + plot.groundWidth() > size.getX()
+                    || plot.groundZ() + plot.groundDepth() > size.getZ()
+                    || building.floorY() + size.getY() > context.heightAccessor().getMaxBuildHeight()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Rejects independent elevations that would make one component's roof or wall clip another's room. */
     public boolean geometryFits(TerrainPlanner.Plan plan, StructureTemplateManager manager) {
-        Map<BlockPos, Block> solid = new HashMap<>();
-        Set<BlockPos> clearing = new HashSet<>();
+        Long2ObjectOpenHashMap<Block> solid = new Long2ObjectOpenHashMap<>();
+        LongOpenHashSet clearing = new LongOpenHashSet();
         for (TerrainPlanner.Building building : plan.buildings()) {
             TerrainPlanner.Plot plot = building.plot();
             StructureTemplate template = manager.get(plot.template()).orElseThrow(
                     () -> new IllegalStateException("Missing terrain component " + plot.template()));
-            for (Block block : BuiltInRegistries.BLOCK) {
-                if (block == Blocks.STRUCTURE_VOID) continue;
-                var settings = new StructurePlaceSettings().setRandom(RandomSource.create(0));
-                for (var info : template.filterBlocks(BlockPos.ZERO, settings, block)) {
-                    BlockPos position = info.pos().offset(plot.x(), building.floorY(), plot.z());
-                    if (block == Blocks.AIR) {
-                        if (solid.containsKey(position)) return false;
-                        clearing.add(position);
-                    } else {
-                        if (clearing.contains(position)) return false;
-                        Block previous = solid.putIfAbsent(position, block);
-                        if (previous != null && previous != block) return false;
-                    }
-                }
+            Shape shape = SHAPES.computeIfAbsent(template, TerrainSettlementStructure::shape);
+            for (int i = 0; i < shape.solid().length; i++) {
+                long position = BlockPos.offset(shape.solid()[i], plot.x(), building.floorY(), plot.z());
+                if (clearing.contains(position)) return false;
+                Block previous = solid.putIfAbsent(position, shape.blocks()[i]);
+                if (previous != null && previous != shape.blocks()[i]) return false;
+            }
+            for (long relative : shape.air()) {
+                long position = BlockPos.offset(relative, plot.x(), building.floorY(), plot.z());
+                if (solid.containsKey(position)) return false;
+                clearing.add(position);
             }
         }
         return true;
     }
 
-    private boolean preflight(GenerationContext context, TerrainPlanner.Sampler sampler) {
-        int lowest = Integer.MAX_VALUE, highest = Integer.MIN_VALUE;
-        for (int[] point : new int[][]{{0,0},{width-1,0},{0,width-1},{width-1,width-1},{width/2,width/2}}) {
-            TerrainPlanner.Sample sample = sampler.sample(point[0], point[1]);
-            if (!TerrainPlanner.suitable(sample, context.heightAccessor().getMinBuildHeight(),
-                    context.heightAccessor().getMaxBuildHeight())) return false;
-            lowest = Math.min(lowest, sample.groundY());
-            highest = Math.max(highest, sample.groundY());
+    private record Shape(long[] solid, Block[] blocks, long[] air) {}
+
+    private static Shape shape(StructureTemplate template) {
+        LongArrayList solid = new LongArrayList();
+        List<Block> blocks = new ArrayList<>();
+        LongArrayList air = new LongArrayList();
+        StructurePlaceSettings settings = new StructurePlaceSettings().setRandom(RandomSource.create(0));
+        for (Block block : BuiltInRegistries.BLOCK) {
+            if (block == Blocks.STRUCTURE_VOID) continue;
+            for (var info : template.filterBlocks(BlockPos.ZERO, settings, block)) {
+                if (block == Blocks.AIR) {
+                    air.add(info.pos().asLong());
+                } else {
+                    solid.add(info.pos().asLong());
+                    blocks.add(block);
+                }
+            }
         }
-        if (highest - lowest > TerrainPlanner.MAX_SETTLEMENT_RELIEF) return false;
+        return new Shape(solid.toLongArray(), blocks.toArray(Block[]::new), air.toLongArray());
+    }
+
+    private String preflight(TerrainPlanner.Sampler sampler, int minY, int maxY) {
         for (TerrainPlanner.Plot plot : plots) {
             int x = plot.minX(), z = plot.minZ();
             int maxX = x + plot.groundWidth() - 1, maxZ = z + plot.groundDepth() - 1;
             int low = Integer.MAX_VALUE, high = Integer.MIN_VALUE;
-            for (int[] point : new int[][]{{x,z},{maxX,z},{x,maxZ},{maxX,maxZ},{(x+maxX)/2,(z+maxZ)/2}}) {
+            for (int[] point : new int[][]{{x, z}, {maxX, z}, {x, maxZ}, {maxX, maxZ}, {(x + maxX) / 2, (z + maxZ) / 2}}) {
                 TerrainPlanner.Sample sample = sampler.sample(point[0], point[1]);
-                if (!TerrainPlanner.suitable(sample, context.heightAccessor().getMinBuildHeight(),
-                        context.heightAccessor().getMaxBuildHeight())) return false;
+                if (!TerrainPlanner.suitable(sample, minY, maxY)) return sample.wet() ? "water" : "ground";
                 low = Math.min(low, sample.groundY());
                 high = Math.max(high, sample.groundY());
             }
-            if (high - low > TerrainPlanner.MAX_FOOTPRINT_RELIEF) return false;
+            if (high - low > TerrainPlanner.MAX_FOOTPRINT_RELIEF) {
+                return "footprint-relief:" + plot.template().getPath().replaceAll(".*/", "");
+            }
         }
-        return true;
-    }
-
-    private static TerrainPlanner.Sample sample(GenerationContext context, int x, int z) {
-        int minY = context.heightAccessor().getMinBuildHeight();
-        NoiseColumn column = context.chunkGenerator().getBaseColumn(x, z, context.heightAccessor(), context.randomState());
-        boolean wet = false;
-        for (int y = context.heightAccessor().getMaxBuildHeight() - 1; y >= minY; y--) {
-            BlockState state = column.getBlock(y);
-            if (state.is(BlockTags.LEAVES)) continue;
-            wet |= !state.getFluidState().isEmpty();
-            if (state.isSolid() && state.getFluidState().isEmpty()) return new TerrainPlanner.Sample(y, wet);
-        }
-        return new TerrainPlanner.Sample(minY, wet, false);
+        return null;
     }
 
     @Override

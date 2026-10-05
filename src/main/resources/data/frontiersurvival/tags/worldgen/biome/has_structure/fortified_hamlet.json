@@ -4,6 +4,11 @@
     "minecraft:plains",
     "minecraft:sunflower_plains",
     "minecraft:meadow",
-    "minecraft:savanna"
+    "minecraft:savanna",
+    "minecraft:forest",
+    "minecraft:flower_forest",
+    "minecraft:birch_forest",
+    "minecraft:taiga",
+    "minecraft:snowy_plains"
   ]
 }

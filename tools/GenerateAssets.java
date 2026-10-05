@@ -58,6 +58,7 @@ public final class GenerateAssets {
             voxels.report(file);
             generateTerrain(data, voxels);
         }
+        writeFrontierSites(data);
         Voxels arena = new Voxels("test/arena", 48, 24, 48);
         arena.fill(0, 0, 0, 47, 0, 47, state("grass_block", "snowy", "false"));
         require(arena.entities.isEmpty(), "Arena must be empty");
@@ -138,8 +139,9 @@ public final class GenerateAssets {
             plots.add(terrainPlot(original, "guard_post_0", 18, 10, 1, 1, 18, 10, 1, 1, v -> {}, List.of()));
             plots.add(terrainPlot(original, "guard_post_1", 20, 32, 1, 1, 20, 32, 1, 1, v -> {}, List.of()));
         } else if (original.name.equals("watchtower")) {
-            // One small attached outpost, with shallow supports and a strict local relief limit.
-            plots.add(terrainPlot(original, "tower_0", 0, 0, 13, 13, 0, 0, 13, 13, null, List.of()));
+            // One compact outpost; the terrain grid adds a margin so surrounding ground can blend into it.
+            plots.add(terrainPlot(original, "tower_0", 0, 0, 13, 13, 0, 0, 13, 13, null,
+                List.of(new Pos(5, 6, 12), new Pos(6, 6, 12), new Pos(7, 6, 12))));
         } else if (original.name.equals("bandit_camp")) {
             int[][] tents = {{3,4},{13,4},{13,13}};
             for (int i = 0; i < tents.length; i++) {
@@ -183,16 +185,23 @@ public final class GenerateAssets {
         for (TerrainPlot plot : plots) {
             for (Pos entrance : plot.entrances) paths.add(new Pos(plot.x + entrance.x, 0, plot.z + entrance.z));
         }
+        int margin = original.name.equals("watchtower") ? 3 : 0;
+        if (margin > 0) {
+            // Graded approach from the outpost gate across the blending margin.
+            for (int z = original.depth; z < original.depth + margin; z++) {
+                for (int x = 5; x <= 7; x++) paths.add(new Pos(x, 0, z));
+            }
+        }
         StringBuilder json = new StringBuilder("{\n  \"type\": \"frontiersurvival:terrain_settlement\",\n");
         json.append("  \"biomes\": \"#frontiersurvival:has_structure/").append(original.name).append("\",\n")
             .append("  \"step\": \"surface_structures\",\n  \"terrain_adaptation\": \"none\",\n")
             .append("  \"spawn_overrides\": ").append(original.name.equals("bandit_camp") ? "{}" :
                 "{\"monster\":{\"bounding_box\":\"piece\",\"spawns\":[]}}").append(",\n")
-            .append("  \"width\": ").append(original.width).append(",\n  \"plots\": [\n");
+            .append("  \"width\": ").append(original.width + 2 * margin).append(",\n  \"plots\": [\n");
         for (int i = 0; i < plots.size(); i++) {
             TerrainPlot plot = plots.get(i);
             json.append("    {\"template\":\"").append(NS).append(plot.component.name).append("\",\"x\":")
-                .append(plot.x).append(",\"z\":").append(plot.z).append(",\"ground_x\":").append(plot.groundX)
+                .append(plot.x + margin).append(",\"z\":").append(plot.z + margin).append(",\"ground_x\":").append(plot.groundX)
                 .append(",\"ground_z\":").append(plot.groundZ).append(",\"ground_width\":").append(plot.groundWidth)
                 .append(",\"ground_depth\":").append(plot.groundDepth).append(",\"entrances\":[");
             for (int e = 0; e < plot.entrances.size(); e++) {
@@ -207,7 +216,7 @@ public final class GenerateAssets {
         for (int i = 0; i < ordered.size(); i++) {
             if (i > 0) json.append(',');
             Pos pos = ordered.get(i);
-            json.append('[').append(pos.x).append(',').append(pos.z).append(']');
+            json.append('[').append(pos.x + margin).append(',').append(pos.z + margin).append(']');
         }
         json.append(']');
         if (!original.name.equals("watchtower")) {
@@ -219,15 +228,27 @@ public final class GenerateAssets {
         }
         json.append("\n}\n");
         Files.writeString(data.resolve("worldgen").resolve("structure").resolve("terrain_" + original.name + ".json"), json);
-        int spacing = original.width == 39 ? 32 : original.width == 13 ? 24 : 28;
-        int separation = original.width == 39 ? 12 : original.width == 13 ? 8 : 10;
-        int salt = original.width == 39 ? 735194021 : original.width == 13 ? 418907563 : 962830147;
-        Files.writeString(data.resolve("worldgen").resolve("structure_set").resolve(original.name + ".json"),
-            "{\n  \"structures\": [{\"structure\":\"" + NS + "terrain_" + original.name + "\",\"weight\":1}],\n"
-            + "  \"placement\":{\"type\":\"minecraft:random_spread\",\"spacing\":" + spacing
-            + ",\"separation\":" + separation + ",\"spread_type\":\"linear\",\"salt\":" + salt + "}\n}\n");
         System.out.println("Terrain " + original.name + ": " + plots.size() + " grounded plots, " + paths.size()
             + " graded path cells; legacy template preserved.");
+    }
+
+    /**
+     * One placement grid for every frontier site: each region holds at most one hamlet, camp or outpost, so they
+     * cannot overlap; if the chosen kind does not fit the terrain, vanilla tries the others in weighted order.
+     */
+    private static void writeFrontierSites(Path data) throws IOException {
+        Path sets = data.resolve("worldgen").resolve("structure_set");
+        for (String old : List.of("fortified_hamlet", "watchtower", "bandit_camp")) {
+            Files.deleteIfExists(sets.resolve(old + ".json"));
+        }
+        Files.writeString(sets.resolve("frontier_sites.json"), "{\n  \"structures\": [\n"
+            + "    {\"structure\":\"" + NS + "terrain_fortified_hamlet\",\"weight\":4},\n"
+            + "    {\"structure\":\"" + NS + "terrain_bandit_camp\",\"weight\":3},\n"
+            + "    {\"structure\":\"" + NS + "terrain_watchtower\",\"weight\":3}\n  ],\n"
+            + "  \"placement\": {\"type\":\"minecraft:random_spread\",\"spacing\":12,\"separation\":4,"
+            + "\"spread_type\":\"linear\",\"salt\":1650973021,\n"
+            + "    \"exclusion_zone\":{\"other_set\":\"minecraft:villages\",\"chunk_count\":5}}\n}\n");
+        System.out.println("Frontier sites: one shared placement grid for hamlets, camps and outposts.");
     }
 
     private static boolean insideGround(List<TerrainPlot> plots, int x, int z) {

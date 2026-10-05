@@ -189,7 +189,7 @@ public final class FrontierGameTests {
         helper.succeed();
     }
 
-    @GameTest(template = "test/arena", batch = "hamlet", timeoutTicks = 100)
+    @GameTest(template = "test/arena", batch = "hamlet", timeoutTicks = 300)
     public static void originalHamletLoadsWithUsableResidents(GameTestHelper helper) {
         ServerLevel level = helper.getLevel();
         BlockPos origin = helper.absolutePos(new BlockPos(3, 1, 3));

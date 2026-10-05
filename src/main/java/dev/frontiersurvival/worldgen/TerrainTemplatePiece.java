@@ -69,12 +69,21 @@ public final class TerrainTemplatePiece extends TemplateStructurePiece {
 
     private void includeSupports() {
         BoundingBox box = template.getBoundingBox(placeSettings, templatePosition);
+        int highestGround = templatePosition.getY();
+        for (int height : natural) highestGround = Math.max(highestGround, height);
         boundingBox = new BoundingBox(box.minX(), templatePosition.getY() - TerrainPlanner.MAX_SUPPORT,
-                box.minZ(), box.maxX(), box.maxY(), box.maxZ());
+                box.minZ(), box.maxX(), Math.max(box.maxY(), highestGround), box.maxZ());
     }
 
     public int floorY() { return templatePosition.getY(); }
     public int[] groundHeights() { return natural.clone(); }
+
+    /** The building's ground-contact columns, at floor level. */
+    public BoundingBox footprint() {
+        int x = templatePosition.getX() + groundX;
+        int z = templatePosition.getZ() + groundZ;
+        return new BoundingBox(x, floorY(), z, x + groundWidth - 1, floorY(), z + groundDepth - 1);
+    }
 
     @Override
     protected void addAdditionalSaveData(StructurePieceSerializationContext context, CompoundTag tag) {
@@ -89,13 +98,24 @@ public final class TerrainTemplatePiece extends TemplateStructurePiece {
     @Override
     public void postProcess(WorldGenLevel level, StructureManager structures, ChunkGenerator generator,
                             RandomSource random, BoundingBox chunkBox, ChunkPos chunk, BlockPos pivot) {
+        int templateTop = floorY() + template.getSize().getY();
         for (int z = 0; z < groundDepth; z++) {
             for (int x = 0; x < groundWidth; x++) {
-                int bottom = natural[z * groundWidth + x];
+                int ground = natural[z * groundWidth + x];
+                int columnX = templatePosition.getX() + groundX + x;
+                int columnZ = templatePosition.getZ() + groundZ + z;
+                int bottom = floorY() - TerrainPlanner.MAX_SUPPORT;
                 for (int y = floorY() - 1; y >= bottom; y--) {
-                    BlockPos pos = new BlockPos(templatePosition.getX() + groundX + x, y,
-                            templatePosition.getZ() + groundZ + z);
-                    if (chunkBox.isInside(pos)) level.setBlock(pos, Blocks.COBBLESTONE.defaultBlockState(), 2);
+                    BlockPos pos = new BlockPos(columnX, y, columnZ);
+                    if (!chunkBox.isInside(pos)) continue;
+                    // Fill to sampled ground, then on through any cave or ravine carved after sampling.
+                    if (y < ground && !level.getBlockState(pos).canBeReplaced()) break;
+                    level.setBlock(pos, Blocks.COBBLESTONE.defaultBlockState(), 2);
+                }
+                // Low components (farms, lamps, posts) leave natural ground above their template; excavate it.
+                for (int y = templateTop; y <= ground; y++) {
+                    BlockPos pos = new BlockPos(columnX, y, columnZ);
+                    if (chunkBox.isInside(pos)) level.setBlock(pos, Blocks.AIR.defaultBlockState(), 2);
                 }
             }
         }

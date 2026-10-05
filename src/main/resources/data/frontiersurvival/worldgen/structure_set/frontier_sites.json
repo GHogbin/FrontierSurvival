@@ -1,0 +1,9 @@
+{
+  "structures": [
+    {"structure":"frontiersurvival:terrain_fortified_hamlet","weight":4},
+    {"structure":"frontiersurvival:terrain_bandit_camp","weight":3},
+    {"structure":"frontiersurvival:terrain_watchtower","weight":3}
+  ],
+  "placement": {"type":"minecraft:random_spread","spacing":12,"separation":4,"spread_type":"linear","salt":1650973021,
+    "exclusion_zone":{"other_set":"minecraft:villages","chunk_count":5}}
+}

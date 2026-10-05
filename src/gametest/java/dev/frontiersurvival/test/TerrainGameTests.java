@@ -44,6 +44,58 @@ public final class TerrainGameTests {
     private TerrainGameTests() {}
 
     @GameTest(template = "test/arena", batch = "terrain")
+    public static void blendingRampsOpenGroundTowardEachFloor(GameTestHelper helper) {
+        List<TerrainPlanner.Plot> plots = List.of(plot(10, 10, 5, 5));
+        List<TerrainPlanner.Cell> path = List.of(new TerrainPlanner.Cell(12, 15), new TerrainPlanner.Cell(12, 16));
+        // A steady east-west slope with five blocks of relief across the footprint itself.
+        TerrainPlanner.Plan plan = TerrainPlanner.plan(39, plots, path, Optional.empty(),
+                (x, z) -> new TerrainPlanner.Sample(60 + x, false), -64, 320).orElseThrow();
+        int floor = plan.buildings().get(0).floorY();
+        helper.assertTrue(floor == 72, "Median floor sits mid-slope");
+        for (int z = 0; z < 39; z++) {
+            for (int x = 0; x < 39; x++) {
+                int distance = Math.max(Math.max(10 - x, x - 14), Math.max(10 - z, z - 14));
+                int target = plan.blend(x, z);
+                if (distance <= 0 || plan.path(x, z) != TerrainPlanner.ABSENT) {
+                    helper.assertTrue(target == TerrainPlanner.ABSENT, "Footprints and paths are never blended");
+                } else if (distance > TerrainPlanner.BLEND_RADIUS) {
+                    helper.assertTrue(target == TerrainPlanner.ABSENT, "Blending stays local to the building");
+                } else {
+                    int ground = target == TerrainPlanner.ABSENT ? plan.ground(x, z) : target;
+                    helper.assertTrue(Math.abs(ground - floor) <= distance,
+                            "Ground within " + distance + " blocks rises or falls toward the floor at one block per block");
+                }
+            }
+        }
+        helper.assertTrue(plan.blend(9, 12) == 71 && plan.blend(7, 12) == 69 && plan.blend(15, 12) == 73,
+                "Low side is filled and high side is cut into a one-block-per-block ramp");
+        helper.succeed();
+    }
+
+    @GameTest(template = "test/arena", batch = "terrain")
+    public static void steepDropsBesideBuildingsStayNaturalAndReload(GameTestHelper helper) {
+        // A plateau edge west of the footprint and a dry cave mouth to its south.
+        TerrainPlanner.Plan plan = TerrainPlanner.plan(19, List.of(plot(5, 5, 5, 5)), List.of(), Optional.empty(),
+                (x, z) -> new TerrainPlanner.Sample(x < 5 ? 66 : x == 7 && z == 12 ? 60 : 80, false), -64, 320).orElseThrow();
+        for (int z = 0; z < 19; z++) {
+            for (int x = 0; x < 19; x++) {
+                int target = plan.blend(x, z);
+                helper.assertTrue(target == TerrainPlanner.ABSENT
+                                || Math.abs(target - plan.ground(x, z)) <= TerrainPlanner.MAX_BLEND_CHANGE,
+                        "Blending never plans an extreme fill or cut");
+            }
+        }
+        helper.assertTrue(plan.blend(4, 7) == TerrainPlanner.ABSENT && plan.blend(7, 12) == TerrainPlanner.ABSENT,
+                "Cliffs and cave mouths beside a building are left natural");
+        StructurePieceSerializationContext context = StructurePieceSerializationContext.fromLevel(helper.getLevel());
+        ListTag tags = new ListTag();
+        tags.add(new TerrainGroundPiece(new BlockPos(100, 0, 100), plan).createTag(context));
+        helper.assertTrue(PiecesContainer.load(tags, context).pieces().size() == 1,
+                "The saved ground piece always reloads after a restart");
+        helper.succeed();
+    }
+
+    @GameTest(template = "test/arena", batch = "terrain")
     public static void backWallsDoNotCreateFalseDoorstepAnchors(GameTestHelper helper) {
         List<TerrainPlanner.Plot> plots = List.of(
                 new TerrainPlanner.Plot(SYNTHETIC, 2, 2, 0, 0, 3, 3, List.of(new TerrainPlanner.Cell(1, 2))),
@@ -83,14 +135,23 @@ public final class TerrainGameTests {
     public static void unsafeCliffsWaterVoidAndConflictingEntrancesAreRejected(GameTestHelper helper) {
         List<TerrainPlanner.Plot> plots = List.of(plot(2, 2, 5, 5));
         helper.assertTrue(TerrainPlanner.plan(39, plots, List.of(), Optional.empty(),
-                (x, z) -> new TerrainPlanner.Sample(x >= 4 ? 69 : 64, false), -64, 320).isEmpty(),
-                "Five-block building cliff is rejected");
-        helper.assertTrue(TerrainPlanner.plan(39, plots, List.of(), Optional.empty(),
-                (x, z) -> new TerrainPlanner.Sample(x >= 20 ? 77 : 64, false), -64, 320).isEmpty(),
-                "Settlement relief above twelve is rejected");
-        helper.assertTrue(TerrainPlanner.plan(39, plots, List.of(), Optional.empty(),
+                (x, z) -> new TerrainPlanner.Sample(x >= 4 ? 70 : 64, false), -64, 320).isEmpty(),
+                "Six-block building cliff is rejected");
+        helper.assertTrue(TerrainPlanner.plan(39, List.of(plot(2, 2, 5, 5), plot(30, 2, 5, 5)), List.of(), Optional.empty(),
+                (x, z) -> new TerrainPlanner.Sample(x >= 20 ? 81 : 64, false), -64, 320).isEmpty(),
+                "Building elevations more than sixteen blocks apart are rejected");
+        TerrainPlanner.Plan pond = TerrainPlanner.plan(39, plots, List.of(), Optional.empty(),
+                (x, z) -> x == 15 && z == 15 ? new TerrainPlanner.Sample(55, true)
+                        : x == 30 && z == 30 ? new TerrainPlanner.Sample(-64, false, false)
+                        : new TerrainPlanner.Sample(64, false), -64, 320).orElseThrow();
+        helper.assertTrue(pond.ground(15, 15) == 64 && pond.ground(30, 30) == 64,
+                "Untouched water or holes are allowed but never become foundation heights");
+        helper.assertTrue(TerrainPlanner.plan(39, plots, List.of(new TerrainPlanner.Cell(15, 15)), Optional.empty(),
                 (x, z) -> new TerrainPlanner.Sample(64, x == 15 && z == 15), -64, 320).isEmpty(),
-                "Water in the candidate courtyard is rejected, not buried");
+                "A path through water is rejected, not buried");
+        helper.assertTrue(TerrainPlanner.plan(39, plots, List.of(), Optional.of(new TerrainPlanner.Walls(1, 37, 18, 20, false)),
+                (x, z) -> new TerrainPlanner.Sample(64, x == 37 && z == 10), -64, 320).isEmpty(),
+                "A palisade through water is rejected");
         helper.assertTrue(TerrainPlanner.plan(39, plots, List.of(), Optional.empty(),
                 (x, z) -> new TerrainPlanner.Sample(64, x == 3 && z == 3), -64, 320).isEmpty(),
                 "Water-covered footprint is rejected");
@@ -448,7 +509,7 @@ public final class TerrainGameTests {
         for (int z = 0; z < plan.width(); z++) {
             for (int x = 0; x < plan.width(); x++) {
                 if (plan.occupant(x, z) != 0 || plan.path(x, z) != TerrainPlanner.ABSENT
-                        || plan.wall(x, z) != TerrainPlanner.ABSENT) continue;
+                        || plan.wall(x, z) != TerrainPlanner.ABSENT || plan.blend(x, z) != TerrainPlanner.ABSENT) continue;
                 boolean templateCell = false;
                 for (TerrainPlanner.Plot plot : structure.plots()) {
                     var size = level.getStructureManager().get(plot.template()).orElseThrow().getSize();

@@ -5,6 +5,7 @@ import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.StructureManager;
@@ -24,6 +25,7 @@ public final class TerrainGroundPiece extends StructurePiece {
     private final int[] occupancy;
     private final int[] paths;
     private final int[] wallHeights;
+    private final int[] blend;
     private final Optional<TerrainPlanner.Walls> walls;
 
     public TerrainGroundPiece(BlockPos origin, TerrainPlanner.Plan plan) {
@@ -35,6 +37,7 @@ public final class TerrainGroundPiece extends StructurePiece {
         occupancy = plan.occupancy();
         paths = plan.pathHeights();
         wallHeights = plan.wallHeights();
+        blend = plan.blendHeights();
         walls = plan.walls();
     }
 
@@ -47,8 +50,15 @@ public final class TerrainGroundPiece extends StructurePiece {
         occupancy = tag.getIntArray("Occupancy").clone();
         paths = tag.getIntArray("Paths").clone();
         wallHeights = tag.getIntArray("WallHeights").clone();
+        // 0.1.1 pieces predate blended ground and simply keep their saved earthworks.
+        if (tag.contains("Blend", Tag.TAG_INT_ARRAY)) {
+            blend = tag.getIntArray("Blend").clone();
+        } else {
+            blend = new int[natural.length];
+            Arrays.fill(blend, TerrainPlanner.ABSENT);
+        }
         if (width < 13 || width > 39 || natural.length != width * width || occupancy.length != natural.length
-                || paths.length != natural.length || wallHeights.length != natural.length) {
+                || paths.length != natural.length || wallHeights.length != natural.length || blend.length != natural.length) {
             throw new IllegalArgumentException("Invalid saved terrain ground profile");
         }
         if (tag.contains("Walls", Tag.TAG_COMPOUND)) {
@@ -61,7 +71,9 @@ public final class TerrainGroundPiece extends StructurePiece {
         for (int i = 0; i < natural.length; i++) {
             if (paths[i] != TerrainPlanner.ABSENT && Math.abs((long) paths[i] - natural[i]) > TerrainPlanner.MAX_PATH_ADJUSTMENT
                     || wallHeights[i] != TerrainPlanner.ABSENT
-                    && Math.abs((long) wallHeights[i] - natural[i]) > TerrainPlanner.MAX_PATH_ADJUSTMENT) {
+                    && Math.abs((long) wallHeights[i] - natural[i]) > TerrainPlanner.MAX_PATH_ADJUSTMENT
+                    || blend[i] != TerrainPlanner.ABSENT
+                    && Math.abs((long) blend[i] - natural[i]) > TerrainPlanner.MAX_BLEND_CHANGE) {
                 throw new IllegalArgumentException("Invalid saved terrain earthworks");
             }
         }
@@ -79,6 +91,7 @@ public final class TerrainGroundPiece extends StructurePiece {
     public int[] pathHeights() { return paths.clone(); }
     public int[] wallHeights() { return wallHeights.clone(); }
     public int[] occupancy() { return occupancy.clone(); }
+    public int[] blendHeights() { return blend.clone(); }
 
     @Override
     protected void addAdditionalSaveData(StructurePieceSerializationContext context, CompoundTag tag) {
@@ -89,6 +102,7 @@ public final class TerrainGroundPiece extends StructurePiece {
         tag.putIntArray("Occupancy", occupancy.clone());
         tag.putIntArray("Paths", paths.clone());
         tag.putIntArray("WallHeights", wallHeights.clone());
+        tag.putIntArray("Blend", blend.clone());
         walls.ifPresent(value -> {
             CompoundTag wall = new CompoundTag();
             wall.putInt("Min", value.min());
@@ -119,8 +133,25 @@ public final class TerrainGroundPiece extends StructurePiece {
                         write(level, chunkBox, x, y, z, Blocks.OAK_LOG.defaultBlockState());
                     }
                 }
+                if (blend[i] != TerrainPlanner.ABSENT) blendColumn(level, chunkBox, x, z, natural[i], blend[i]);
             }
         }
+    }
+
+    private void blendColumn(WorldGenLevel level, BoundingBox chunkBox, int x, int z, int naturalY, int targetY) {
+        BlockPos top = new BlockPos(originX + x, naturalY, originZ + z);
+        if (!chunkBox.isInside(top)) return;
+        BlockState current = level.getBlockState(top);
+        // Keep the biome's own top layer (grass, podzol, sand, snow-covered grass) on the reshaped surface.
+        BlockState surface = current.isAir() || !current.getFluidState().isEmpty()
+                ? Blocks.GRASS_BLOCK.defaultBlockState() : current;
+        BlockState fill = surface.is(BlockTags.DIRT) ? Blocks.DIRT.defaultBlockState() : surface;
+        if (targetY > naturalY) {
+            for (int y = naturalY; y < targetY; y++) write(level, chunkBox, x, y, z, fill);
+        } else {
+            for (int y = targetY + 1; y <= naturalY; y++) write(level, chunkBox, x, y, z, Blocks.AIR.defaultBlockState());
+        }
+        write(level, chunkBox, x, targetY, z, surface);
     }
 
     private void column(WorldGenLevel level, BoundingBox chunkBox, int x, int z, int naturalY,

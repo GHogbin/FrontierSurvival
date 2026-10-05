@@ -1,8 +1,8 @@
 FRONTIER SURVIVAL - INDEPENDENT MVP
-Version 0.1.1 | Minecraft Java 1.20.1 | Forge 47.4.0 | Java 17
+Version 0.1.2 | Minecraft Java 1.20.1 | Forge 47.4.0 | Java 17
 
 INSTALL
-Put frontier-survival-1.20.1-forge-0.1.1.jar in the mods folder of your
+Put frontier-survival-1.20.1-forge-0.1.2.jar in the mods folder of your
 Minecraft Java 1.20.1 / Forge 47.4.0 instance and restart the game.
 Install the same JAR on both clients and server for multiplayer.
 No other mod libraries are required. This is NOT Fabric, NeoForge or Bedrock.
@@ -17,6 +17,30 @@ chunks in a 1.20.1 save: already generated villages/chunks are not rebuilt.
 Never open a world from a newer Minecraft version in 1.20.1.
 Do not remove the mod from saves containing its entities/charter blocks
 without a backup.
+
+FREQUENCY FIX IN 0.1.2
+0.1.1 rejected most sites: building footprints needed near-flat ground and
+any pond anywhere in the settlement square cancelled it. Each check also
+cost roughly half a second of world generation per candidate.
+
+Hamlets, camps and watchtowers now share one placement grid of 12 chunks
+(192 blocks), so a region holds at most one frontier site and they never
+overlap each other. If the chosen kind does not suit the terrain or biome,
+the others are tried. Sites are kept a few chunks clear of vanilla villages.
+Each candidate also tries nine nearby positions and uses the one needing
+the least earthworks.
+
+Building footprints may now span up to five blocks of slope. Supports fill
+the low side, the high side is excavated, and open ground within three
+blocks is ramped toward each floor using the local surface block. Water
+or holes in untouched courtyard corners are allowed; buildings, paths and
+palisades still never sit on water. Foundations continue through any cave
+carved beneath a floor. Terrain is sampled with vanilla's own chunk noise,
+exactly matching Minecraft's terrain heights, at a fraction of the cost.
+
+Measured over two default-generated 3 km x 3 km worlds: 42 hamlets,
+67 bandit camps and 106 watchtowers, with no overlapping sites.
+Exact counts vary by seed and biome.
 
 TERRAIN FIX IN 0.1.1
 New hamlets and camps place cottages, towers, markets, farms and tents at
@@ -35,8 +59,9 @@ are placed, so loading/generation order cannot change their heights.
 
 Replace the old JAR; never install both versions. Existing structures are
 NOT rebuilt or moved. Old templates and structure IDs remain registered
-for partially generated 0.1.0 structures. Only newly generated starts use
-the new terrain structure IDs below. Explore NEW chunks or use a new world.
+for partially generated older structures. Only newly generated chunks use
+the shared frontier-site grid. Explore NEW chunks or use a new world;
+sites near the edge of already-explored land may be cut off there.
 
 THE FIVE MVP FEATURES
 1. Guards: original blue-uniform melee and bow defenders. 30 health.
@@ -49,7 +74,8 @@ THE FIVE MVP FEATURES
    they do not burn in sunlight. Camps have three bandits and a 48-health
    axe-wielding leader with better loot. No block destruction.
 3. Fortified hamlets: original 39x39 palisade villages in plains, sunflower
-   plains, meadows and savanna, with four cottages, eight beds, four ordinary
+   plains, meadows, savanna, forests, flower and birch forests, taiga and
+   snowy plains, with four cottages, eight beds, four ordinary
    villagers with vanilla professions/trades, farms, bell, supplies, two
    climbable watchtowers, three guards and a settlement quartermaster.
    These are additional settlements, not replacements for vanilla villages.
@@ -99,15 +125,18 @@ In a cheats-enabled test world:
 /locate structure frontiersurvival:terrain_watchtower
 /locate structure frontiersurvival:terrain_bandit_camp
 Use the returned coordinates to travel/teleport. Structures have biome
-restrictions and placement grids, so they may be a considerable walk away.
+restrictions and share one placement grid, so a nearby region may hold a
+different frontier site; locate always reports a generated one.
 Creative spawn eggs are in the Spawn Eggs tab.
 
 LIMITS
 First MVP, not the full long-term concept. No caravans, quests, diseases,
 fatigue, new professions, siege events, mounted guards, reputation housing
 or timed gates yet. One original layout per structure type, fixed orientation.
-Sites require at most three blocks of relief per building footprint and
-twelve across the settlement; path earthworks are bounded to three blocks.
+Sites allow at most five blocks of relief per building footprint and
+sixteen across the settlement; path earthworks are bounded to three blocks.
+Terrain shaped by other mods' or vanilla structures' terrain adaptation is
+not anticipated, so a site beside one may sit slightly off the ground.
 Hands-on balance and client/multiplayer playtesting are still
 needed. Guards, merchants and camp inhabitants are not automatically
 resurrected. Peaceful removes hostile bandits, including camp inhabitants.
@@ -116,7 +145,8 @@ There is no forced chunk loading, terrain rebuilding or old-mod migration.
 CONFIGURATION
 config\frontiersurvival-common.toml controls reputation, defense reward
 caps and outlaw pursuit. Restart after editing. Structure biome tags,
-spacing and bandit spawn weight can be changed with ordinary datapacks.
+the shared frontier_sites placement grid and bandit spawn weight can be
+changed with ordinary datapacks.
 
 BUILD FROM SOURCE
 Install a Java 17 JDK and set JAVA_HOME, then run:
