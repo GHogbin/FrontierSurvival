@@ -211,12 +211,14 @@ public final class TerrainGroundPiece extends StructurePiece {
         // The exposed ground: a dirt-family block under air or a plant (flowers are not "replaceable" blocks).
         if (turf == null || !open(level.getBlockState(pos.above()))) return false;
         level.setBlock(pos, turf, 2);
-        // Vegetation spilled from an already decorated neighbouring chunk cannot stay rooted on turf.
-        for (int y = 1; y <= 2; y++) {
+        // Vegetation spilled from an already decorated neighbouring chunk cannot stay rooted on turf; tall plants
+        // left above ground that blending lowered are cleared too.
+        for (int y = 1; y <= 4; y++) {
             BlockPos plant = pos.above(y);
-            if (chunkBox.isInside(plant) && level.getBlockState(plant).getBlock() instanceof BushBlock) {
-                level.setBlock(plant, Blocks.AIR.defaultBlockState(), 2);
-            }
+            if (!chunkBox.isInside(plant)) break;
+            BlockState state = level.getBlockState(plant);
+            if (state.getBlock() instanceof BushBlock) level.setBlock(plant, Blocks.AIR.defaultBlockState(), 2);
+            else if (!state.isAir()) break;
         }
         return true;
     }
@@ -246,6 +248,13 @@ public final class TerrainGroundPiece extends StructurePiece {
             for (int y = naturalY; y < targetY; y++) write(level, chunkBox, x, y, z, fill);
         } else {
             for (int y = targetY + 1; y <= naturalY; y++) write(level, chunkBox, x, y, z, Blocks.AIR.defaultBlockState());
+            // Plants that stood on the removed surface would otherwise be left floating.
+            for (int y = naturalY + 1; y <= naturalY + 2; y++) {
+                BlockPos plant = new BlockPos(originX + x, y, originZ + z);
+                if (chunkBox.isInside(plant) && level.getBlockState(plant).getBlock() instanceof BushBlock) {
+                    level.setBlock(plant, Blocks.AIR.defaultBlockState(), 2);
+                }
+            }
         }
         write(level, chunkBox, x, targetY, z, surface);
     }

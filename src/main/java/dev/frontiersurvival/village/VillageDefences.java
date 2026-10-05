@@ -149,7 +149,7 @@ public final class VillageDefences {
                 Box footprint = new Box(inside.x - 2, inside.z - 2, inside.x + 2, inside.z + 2);
                 if (oneChunk(footprint) && !intersectsAnyBox(occupied, footprint.expand(1))
                         && !intersectsCells(ringSet, footprint) && !nearTower(towers, inside)) {
-                    towers.add(new Tower(inside, wall));
+                    towers.add(new Tower(inside, wall, towerSpots(inside, occupied, ringSet)));
                     break;
                 }
             }
@@ -169,18 +169,44 @@ public final class VillageDefences {
             }
         }
 
-        @Nullable Stall stall = findStall(occupied, ringSet, center, palette);
+        @Nullable Stall stall = findStall(occupied, ringSet, towers, center, palette);
         return new DefencePlan(palette, List.copyOf(ring), Set.copyOf(gates), Set.copyOf(gatePosts),
                 List.copyOf(gateGroups), List.copyOf(towers), List.copyOf(guards), stall,
                 List.copyOf(buildings), List.copyOf(occupied));
     }
 
-    private static @Nullable Stall findStall(List<Box> occupied, Set<Cell> ring, BlockPos center, Palette palette) {
+    /**
+     * Where a tower may stand, best first: its planned spot, then nearby spots in the same chunk that keep clear
+     * of the ring and every village piece. The chunk picks the first spot that is dry and buildable.
+     */
+    private static List<Cell> towerSpots(Cell planned, List<Box> occupied, Set<Cell> ring) {
+        int[][] offsets = {{0, 0}, {2, 0}, {-2, 0}, {0, 2}, {0, -2}, {2, 2}, {-2, 2}, {2, -2}, {-2, -2},
+                {4, 0}, {-4, 0}, {0, 4}, {0, -4}};
+        int chunkX = planned.x >> 4, chunkZ = planned.z >> 4;
+        List<Cell> spots = new ArrayList<>();
+        for (int[] offset : offsets) {
+            Cell spot = new Cell(planned.x + offset[0], planned.z + offset[1]);
+            Box footprint = new Box(spot.x - 2, spot.z - 2, spot.x + 2, spot.z + 2);
+            if (footprint.minX >> 4 != chunkX || footprint.maxX >> 4 != chunkX
+                    || footprint.minZ >> 4 != chunkZ || footprint.maxZ >> 4 != chunkZ) continue;
+            if (intersectsAnyBox(occupied, footprint.expand(1)) || intersectsCells(ring, footprint)) continue;
+            spots.add(spot);
+        }
+        return List.copyOf(spots);
+    }
+
+    private static @Nullable Stall findStall(List<Box> occupied, Set<Cell> ring, List<Tower> towers, BlockPos center,
+                                             Palette palette) {
         int[][] dirs = {{1,0},{-1,0},{0,1},{0,-1},{1,1},{1,-1},{-1,1},{-1,-1}};
         for (int r = 7; r <= 28; r += 3) for (int[] d : dirs) {
             Cell c = new Cell(center.getX() + d[0] * r, center.getZ() + d[1] * r);
             Box area = new Box(c.x - 2, c.z - 2, c.x + 2, c.z + 2);
-            if (oneChunk(area) && !intersectsAnyBox(occupied, area.expand(1)) && !intersectsCells(ring, area.expand(1))) {
+            boolean clearOfTowers = true;
+            for (Tower tower : towers) for (Cell spot : tower.spots) {
+                clearOfTowers &= !area.expand(1).intersects(new Box(spot.x - 2, spot.z - 2, spot.x + 2, spot.z + 2));
+            }
+            if (oneChunk(area) && clearOfTowers && !intersectsAnyBox(occupied, area.expand(1))
+                    && !intersectsCells(ring, area.expand(1))) {
                 return new Stall(c, palette);
             }
         }
@@ -278,7 +304,7 @@ public final class VillageDefences {
     public record Gate(int start, int end) {
         public Cell mid(List<Cell> ring) { int n = ring.size(); int len = end >= start ? end - start + 1 : end + n - start + 1; return ring.get((start + len / 2) % n); }
     }
-    public record Tower(Cell center, Cell wall) {}
+    public record Tower(Cell center, Cell wall, List<Cell> spots) {}
     public record Post(Cell center, int radius) {}
     public record Stall(Cell center, Palette palette) {}
     public record DefencePlan(Palette palette, List<Cell> ring, Set<Cell> gates, Set<Cell> gatePosts, List<Gate> gateGroups,
@@ -395,20 +421,30 @@ public final class VillageDefences {
     /**
      * A roofed 5x5 lookout: walled ground floor with a doorway toward the village and arrow slits, a ladder against
      * the back wall up through a full deck, a fenced parapet and a slab roof on corner posts. An archer holds the deck.
+     * It stands on the first of its planned spots that is dry and not too steep.
      */
     private static boolean placeTower(WorldGenLevel level, Tower tower, DefencePlan plan) {
+        for (Cell spot : tower.spots) {
+            if (placeTowerAt(level, spot, tower.wall, plan)) return true;
+        }
+        return false;
+    }
+
+    private static boolean placeTowerAt(WorldGenLevel level, Cell center, Cell wall, DefencePlan plan) {
         int[] ys = new int[25];
         int i = 0, min = Integer.MAX_VALUE, max = Integer.MIN_VALUE;
         for (int dx = -2; dx <= 2; dx++) for (int dz = -2; dz <= 2; dz++) {
-            int y = ground(level, tower.center.x + dx, tower.center.z + dz);
-            if (wet(level, new BlockPos(tower.center.x + dx, y, tower.center.z + dz))) return false;
+            int y = ground(level, center.x + dx, center.z + dz);
+            if (wet(level, new BlockPos(center.x + dx, y, center.z + dz))) return false;
             ys[i++] = y;
             min = Math.min(min, y);
             max = Math.max(max, y);
         }
-        if (max - min > 4) return false;
+        // Up to six blocks of slope: the plinth fills the low side and the high side is cut back.
+        if (max - min > 6) return false;
         java.util.Arrays.sort(ys);
         int base = ys[12];
+        Tower tower = new Tower(center, wall, List.of(center));
         Palette palette = plan.palette;
         Direction door = facingToward(tower.center, tower.wall).getOpposite();
         Direction back = door.getOpposite();

@@ -1,8 +1,8 @@
-FRONTIER SURVIVAL - INDEPENDENT MVP
-Version 0.1.2 | Minecraft Java 1.20.1 | Forge 47.4.0 | Java 17
+FRONTIER SURVIVAL
+Version 0.2.0 | Minecraft Java 1.20.1 | Forge 47.4.0 | Java 17
 
 INSTALL
-Put frontier-survival-1.20.1-forge-0.1.2.jar in the mods folder of your
+Put frontier-survival-1.20.1-forge-0.2.0.jar in the mods folder of your
 Minecraft Java 1.20.1 / Forge 47.4.0 instance and restart the game.
 Install the same JAR on both clients and server for multiplayer.
 No other mod libraries are required. This is NOT Fabric, NeoForge or Bedrock.
@@ -16,83 +16,92 @@ Back up existing saves. Start a new normal Overworld world, or explore new
 chunks in a 1.20.1 save: already generated villages/chunks are not rebuilt.
 Never open a world from a newer Minecraft version in 1.20.1.
 Do not remove the mod from saves containing its entities/charter blocks
-without a backup.
+without a backup. Replace the old JAR; never install two versions at once.
 
-FREQUENCY FIX IN 0.1.2
-0.1.1 rejected most sites: building footprints needed near-flat ground and
-any pond anywhere in the settlement square cancelled it. Each check also
-cost roughly half a second of world generation per candidate.
+NEW IN 0.2.0
+Three sizes of every frontier site, each with its own buildings:
+  Hamlets   small (31 wide): lookout tower, one-bed hut and cottage, stall,
+              farm, 2 guards, quartermaster, 2 villagers.
+            medium (39): the original fortified hamlet, 4 cottages, 2 towers.
+            large (49): 4 towers of mixed heights, guard barracks, longhouses,
+              cottages, smithy, storehouse, well, animal pen, farms, a market
+              with two stalls, 5 guards, 2 quartermasters, 6 villagers.
+  Camps     small (17): two tents round a fire, 2 bandits.
+            medium (23): the original walled camp.
+            large (31): walled camp with four tents incl. the leader's tent,
+              a lookout, stores, 5 bandits and a leader.
+  Outposts  small (15): a lone lookout with an archer and a sentry.
+            medium (19): the original fenced watchtower.
+            large (29): walled fort with two towers, barracks, well, stores,
+              4 guards, quartermaster and a fletcher.
+Every building is still its own terrain-following piece.
 
-Hamlets, camps and watchtowers now share one placement grid of 12 chunks
-(192 blocks), so a region holds at most one frontier site and they never
-overlap each other. If the chosen kind does not suit the terrain or biome,
-the others are tried. Sites are kept a few chunks clear of vanilla villages.
-Each candidate also tries nine nearby positions and uses the one needing
-the least earthworks.
+Random facing: each site is turned a random quarter turn (or whichever turn
+needs the least earthworks on uneven ground). Buildings, doors, paths, gates
+and residents all turn together.
 
-Building footprints may now span up to five blocks of slope. Supports fill
-the low side, the high side is excavated, and open ground within three
-blocks is ramped toward each floor using the local surface block. Water
-or holes in untouched courtyard corners are allowed; buildings, paths and
-palisades still never sit on water. Foundations continue through any cave
-carved beneath a floor. Terrain is sampled with vanilla's own chunk noise,
-exactly matching Minecraft's terrain heights, at a fraction of the cost.
+Regional materials: sites take their look from the biome they stand in.
+  Plains/forest oak and spruce   Taiga spruce and dark oak
+  Birch forest birch             Dark forest dark oak and mossy stone
+  Savanna acacia                 Snowy biomes spruce, dark roofs, stone
+Cloth, beds and banners change colour by region, palisades use local logs,
+and villagers wear their region's clothing.
 
-Measured over two default-generated 3 km x 3 km worlds: 42 hamlets,
-67 bandit camps and 106 watchtowers, with no overlapping sites.
-Exact counts vary by seed and biome.
+No trees inside settlements: open ground inside a site becomes Settlement
+Turf. It looks and tints exactly like grass, but trees, flowers, grass and
+bushes cannot generate on it. Hoes still till it and shovels still make
+paths; it drops dirt (silk touch keeps it). Plants already scattered onto the
+site by neighbouring terrain are cleared. Farms keep their crops.
 
-TERRAIN FIX IN 0.1.1
-New hamlets and camps place cottages, towers, markets, farms and tents at
-independent local ground heights instead of on a single floating slab.
-Rooms, roofs, beds and ladders remain rigid and level. Only small building
-footprints receive foundations; the surrounding ground is not flattened.
-Paths follow a saved, graded ground profile with at most one-block steps
-between neighboring path cells and level door approaches. Hamlet/camp
-palisades step with the surrounding terrain. The compact watchtower outpost
-uses one locally grounded footprint with shallow supports.
+Villages: vanilla villages are about 1.5x more common (spacing 28,
+separation 7, same five village types). New chunks around a village gain:
+  - a palisade ring following the terrain around all its buildings, in the
+    village's regional style (desert villages use cut sandstone),
+  - gates wherever its roads leave, with tall lantern-lit gate posts,
+  - lantern posts along the wall so it stays lit at night,
+  - roofed watchtowers with a ladder, deck, parapet and an archer guard,
+  - melee guards holding each gate,
+  - a market stall near the centre with a Village charter (reputation works
+    there like in hamlets), a quartermaster and supply chests.
+Palisades skip water and never cut through houses, fields or other village
+pieces. These additions are placed per chunk as the village generates, so
+villages in already explored land are not changed.
 
-Unsuitable water-covered sites, cliffs, steep building footprints and
-impossible approaches are skipped rather than generated in mid-air.
-All sampled elevations and supports are saved before individual chunks
-are placed, so loading/generation order cannot change their heights.
+Fixes: crops in frontier farms now survive world generation; paths are
+supported where caves or ravines hollow the ground beneath them.
 
-Replace the old JAR; never install both versions. Existing structures are
-NOT rebuilt or moved. Old templates and structure IDs remain registered
-for partially generated older structures. Only newly generated chunks use
-the shared frontier-site grid. Explore NEW chunks or use a new world;
-sites near the edge of already-explored land may be cut off there.
+EARLIER FIXES
+0.1.2 made sites common and fast to place: one shared placement grid (sites
+never overlap each other and keep clear of villages), nine candidate
+positions per region, up to five blocks of slope per building footprint with
+supports, excavation and ground blending, and terrain sampled exactly the way
+vanilla generates it.
+0.1.1 replaced floating slabs with buildings placed at their own local
+ground heights, graded paths with one-block steps and terrain-following
+palisades. Heights are saved before chunks are placed, so loading order
+cannot change them.
 
-VILLAGES
-Vanilla villages are more common in new Overworld terrain: the village
-structure set keeps the vanilla salt and five village types but uses spacing
-28 / separation 7. New chunks around villages gain a deterministic Frontier
-Survival defence plan: a terrain-following palisade ring, gates where roads
-leave the village, lit gate posts, watchtowers with archer guards, melee gate
-guards, a settlement charter registered as a Village, and a quartermaster
-market stall near the centre. These additions are clipped per chunk, so old
-chunks are not rebuilt and partially explored villages only update in newly
-generated chunks.
-THE FIVE MVP FEATURES
+THE CORE FEATURES
 1. Guards: original blue-uniform melee and bow defenders. 30 health.
-   Patrol close to settlements, defend against bandits/other monsters,
-   avoid attacking creepers, and retaliate if attacked. Guard arrows pass
-   through friendly residents and unintended players. Held melee shields
-   are visual equipment; there is no active shield-blocking AI in this MVP.
+   Patrol close to settlements or hold their posts (village gates and
+   towers), defend against bandits/other monsters, avoid attacking creepers,
+   and retaliate if attacked. Guard arrows pass through friendly residents
+   and unintended players. Held melee shields are visual equipment.
 2. Bandits: armed melee and bow enemies, 24 health, targeting players,
    villagers, quartermasters and guards. Small natural groups spawn on land;
-   they do not burn in sunlight. Camps have three bandits and a 48-health
-   axe-wielding leader with better loot. No block destruction.
-3. Fortified hamlets: original 39x39 palisade villages in plains, sunflower
+   they do not burn in sunlight. Camps hold bandits and, in medium and large
+   camps, a 48-health axe-wielding leader with better loot. No block
+   destruction.
+3. Fortified hamlets: walled frontier settlements in plains, sunflower
    plains, meadows, savanna, forests, flower and birch forests, taiga and
-   snowy plains, with four cottages, eight beds, four ordinary
-   villagers with vanilla professions/trades, farms, bell, supplies, two
-   climbable watchtowers, three guards and a settlement quartermaster.
+   snowy plains, with homes, beds, vanilla villagers with professions and
+   trades, farms, bell, supplies, watchtowers, guards and a quartermaster.
    These are additional settlements, not replacements for vanilla villages.
-4. Watchtower outposts: original 13x13 wilderness towers with two guards
-   (one archer), a villager, quartermaster, shelter/bed and supply chests.
+4. Watchtower outposts: wilderness lookouts and forts with guards, a
+   quartermaster or sentries, shelter and supply chests.
 5. Reputation: independent saved local standing for each player at each
-   hamlet/outpost, from -100 to +100, with discounts and consequences.
+   hamlet, outpost and defended village, from -100 to +100, with discounts
+   and consequences.
 
 PLAY
 Find a settlement; right-click a guard or its gold-topped stone charter to
@@ -130,33 +139,48 @@ COMMANDS
 /frontier reputation
 Both are available without cheats.
 
-In a cheats-enabled test world:
+In a cheats-enabled test world, for example:
+/locate structure frontiersurvival:terrain_hamlet_small
 /locate structure frontiersurvival:terrain_fortified_hamlet
-/locate structure frontiersurvival:terrain_watchtower
+/locate structure frontiersurvival:terrain_hamlet_large
+/locate structure frontiersurvival:terrain_bandit_camp_small
 /locate structure frontiersurvival:terrain_bandit_camp
+/locate structure frontiersurvival:terrain_bandit_camp_large
+/locate structure frontiersurvival:terrain_watchtower_small
+/locate structure frontiersurvival:terrain_watchtower
+/locate structure frontiersurvival:terrain_watchtower_large
+/locate structure #minecraft:village
 Use the returned coordinates to travel/teleport. Structures have biome
 restrictions and share one placement grid, so a nearby region may hold a
 different frontier site; locate always reports a generated one.
-Creative spawn eggs are in the Spawn Eggs tab.
+Creative spawn eggs are in the Spawn Eggs tab; Settlement Turf is in
+Natural Blocks.
+
+Measured over two default-generated 3 km x 3 km worlds: 46 hamlets,
+61 bandit camps and 66 outposts of all sizes, no overlapping sites, every
+facing used and six regional styles. Exact counts vary by seed and biome.
 
 LIMITS
-First MVP, not the full long-term concept. No caravans, quests, diseases,
-fatigue, new professions, siege events, mounted guards, reputation housing
-or timed gates yet. One original layout per structure type, fixed orientation.
+Not the full long-term concept yet: no caravans, quests, diseases,
+fatigue, new villager professions, siege events, mounted guards,
+reputation housing or timed gates.
 Sites allow at most five blocks of relief per building footprint and
 sixteen across the settlement; path earthworks are bounded to three blocks.
-Terrain shaped by other mods' or vanilla structures' terrain adaptation is
-not anticipated, so a site beside one may sit slightly off the ground.
-Hands-on balance and client/multiplayer playtesting are still
-needed. Guards, merchants and camp inhabitants are not automatically
-resurrected. Peaceful removes hostile bandits, including camp inhabitants.
+Terrain shaped by other structures' terrain adaptation is not anticipated,
+so a site beside one may sit slightly off the ground.
+A large tree rooted just outside a site can still lean over its edge.
+Village palisades leave gaps where water, tree trunks or village blocks
+stand on the line.
+Hands-on balance and client/multiplayer playtesting are still needed.
+Guards, merchants and camp inhabitants are not automatically resurrected.
+Peaceful removes hostile bandits, including camp inhabitants.
 There is no forced chunk loading, terrain rebuilding or old-mod migration.
 
 CONFIGURATION
 config\frontiersurvival-common.toml controls reputation, defense reward
 caps and outlaw pursuit. Restart after editing. Structure biome tags,
-the shared frontier_sites placement grid and bandit spawn weight can be
-changed with ordinary datapacks.
+the shared frontier_sites placement grid, the vanilla village spacing and
+bandit spawn weight can be changed with ordinary datapacks.
 
 BUILD FROM SOURCE
 Install a Java 17 JDK and set JAVA_HOME, then run:
@@ -165,7 +189,6 @@ The script regenerates original assets, builds the mod, runs Forge
 GameTests and packages dist. Gradle downloads Forge/Minecraft dependencies.
 On Windows, transient output is stored under
 %LOCALAPPDATA%\FrontierSurvival\build to avoid OneDrive file locks.
-Only your new FrontierSurvival project is built.
 
 Original assets can also be regenerated with:
   java tools\GenerateAssets.java
@@ -175,4 +198,3 @@ LICENSE
 New source and original generated assets: MIT (see LICENSE).
 Minecraft/Forge remain their respective owners' software; the mod refers
 to vanilla assets at runtime and does not redistribute the game.
-

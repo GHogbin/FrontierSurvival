@@ -67,7 +67,7 @@ public final class VillageDefencesGameTests {
             StructureStart start = startAt(level, villageTag, new ChunkPos(located.getFirst()));
             if (start == null || !start.isValid()) continue;
             DefencePlan plan = VillageDefences.planForTest(level, start);
-            if (!plan.ring().isEmpty() && !plan.gateGroups().isEmpty() && !plan.towers().isEmpty() && plan.stall() != null) {
+            if (!plan.ring().isEmpty() && !plan.gateGroups().isEmpty() && plan.towers().size() >= 2 && plan.stall() != null) {
                 chosen = new Candidate(located.getFirst(), start, plan);
                 break;
             }
@@ -148,14 +148,18 @@ public final class VillageDefencesGameTests {
     }
 
     private static void assertTowerArcher(GameTestHelper helper, ServerLevel level, DefencePlan plan) {
+        List<String> seen = new java.util.ArrayList<>();
         for (Tower tower : plan.towers()) {
-            AABB box = new AABB(tower.center().x() - 3, level.getMinBuildHeight(), tower.center().z() - 3,
-                    tower.center().x() + 4, level.getMaxBuildHeight(), tower.center().z() + 4);
+            // Towers may slide up to four blocks from their planned centre to find dry, buildable ground.
+            AABB box = new AABB(tower.center().x() - 7, level.getMinBuildHeight(), tower.center().z() - 7,
+                    tower.center().x() + 8, level.getMaxBuildHeight(), tower.center().z() + 8);
             for (GuardEntity guard : level.getEntitiesOfClass(GuardEntity.class, box)) {
                 if (guard.isArcher() && guard.hasPost() && guard.postRadius() <= 4) return;
             }
+            int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, tower.center().x(), tower.center().z());
+            seen.add(tower.center() + " top=" + level.getBlockState(new BlockPos(tower.center().x(), top - 1, tower.center().z())).getBlock());
         }
-        helper.fail("no post-bound archer found on a generated watchtower");
+        helper.fail("no post-bound archer found on a generated watchtower: " + seen);
     }
 
     private static void assertGateGuard(GameTestHelper helper, ServerLevel level, DefencePlan plan) {
