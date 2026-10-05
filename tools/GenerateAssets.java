@@ -294,11 +294,14 @@ public final class GenerateAssets {
             }
         }
         Path componentRoot = data.resolve("structures").resolve("terrain").resolve(original.name);
-        deleteTree(componentRoot);
+        Set<Path> written = new HashSet<>();
         for (TerrainPlot plot : plots) {
             plot.component.connectBarriers();
-            writeVerified(data.resolve("structures").resolve(plot.component.name + ".nbt"), plot.component.template());
+            Path file = data.resolve("structures").resolve(plot.component.name + ".nbt");
+            writeVerified(file, plot.component.template());
+            written.add(file.toAbsolutePath().normalize());
         }
+        removeStaleComponents(componentRoot, written);
         Set<Pos> paths = new HashSet<>();
         for (Pos pos : original.paths) {
             if (original.accessible(pos)) paths.add(new Pos(pos.x, 0, pos.z));
@@ -1330,11 +1333,18 @@ public final class GenerateAssets {
         }
     }
 
-    private static void deleteTree(Path path) throws IOException {
-        if (!Files.exists(path)) return;
-        try (var entries = Files.walk(path)) {
-            for (Path entry : entries.sorted(Comparator.reverseOrder()).toList()) {
-                Files.delete(entry);
+    /**
+     * Removes component templates a layout no longer uses. Files only, after the new set is written: synced
+     * folders (OneDrive) can refuse directory deletion, which must never leave a layout half-generated.
+     */
+    private static void removeStaleComponents(Path root, Set<Path> keep) throws IOException {
+        if (!Files.isDirectory(root)) return;
+        try (var entries = Files.list(root)) {
+            for (Path entry : entries.toList()) {
+                Path normalized = entry.toAbsolutePath().normalize();
+                if (Files.isRegularFile(entry) && entry.toString().endsWith(".nbt") && !keep.contains(normalized)) {
+                    Files.delete(entry);
+                }
             }
         }
     }

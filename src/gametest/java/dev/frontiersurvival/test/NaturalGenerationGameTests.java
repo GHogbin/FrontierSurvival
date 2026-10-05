@@ -97,7 +97,7 @@ public final class NaturalGenerationGameTests {
                 defenders += residents(building, camp);
             }
             helper.assertTrue(columns > 0 && ground != null, name + " contains a ground plan and grounded buildings");
-            assertClearOfVegetation(helper, level, name, ground);
+            assertClearOfVegetation(helper, level, name, ground, start.getPieces());
             assertRegionalMaterials(helper, level, name, ground, start);
             assertBuildingsIntact(helper, level, name, start);
             sites.put(name, new Site(name, box, camp ? BanditEntity.class : GuardEntity.class, defenders));
@@ -123,7 +123,8 @@ public final class NaturalGenerationGameTests {
         return count;
     }
 
-    private static void assertClearOfVegetation(GameTestHelper helper, ServerLevel level, String name, TerrainGroundPiece ground) {
+    private static void assertClearOfVegetation(GameTestHelper helper, ServerLevel level, String name, TerrainGroundPiece ground,
+                                                List<StructurePiece> pieces) {
         BlockPos origin = ground.origin();
         int width = ground.width();
         int low = Integer.MAX_VALUE, high = Integer.MIN_VALUE;
@@ -141,20 +142,46 @@ public final class NaturalGenerationGameTests {
                     BlockState state = level.getBlockState(pos);
                     if (state.is(FrontierSurvival.SETTLEMENT_GRASS.get())) turf++;
                     // Generated trees always leave dirt under their trunk; settlement posts stand on stone or timber.
-                    boolean trunk = state.is(BlockTags.LOGS) && level.getBlockState(pos.below()).is(BlockTags.DIRT);
+                    // A 2x2 tree rooted just outside may straddle the outermost ring, so only inner cells count.
+                    boolean edge = x == 0 || z == 0 || x == width - 1 || z == width - 1;
+                    boolean trunk = !edge && state.is(BlockTags.LOGS) && level.getBlockState(pos.below()).is(BlockTags.DIRT);
                     boolean plant = state.is(BlockTags.FLOWERS) || state.is(BlockTags.SAPLINGS) || state.is(Blocks.GRASS)
                             || state.is(Blocks.TALL_GRASS) || state.is(Blocks.FERN) || state.is(Blocks.LARGE_FERN)
                             || state.is(Blocks.SWEET_BERRY_BUSH);
+                    // Grass in a carver tunnel under the courtyard is cave flora, not something rooted in the site.
+                    for (int h = 1; h <= 4 && plant; h++) {
+                        BlockState above = level.getBlockState(pos.above(h));
+                        plant = above.canBeReplaced() || above.is(BlockTags.LEAVES) || above.isAir();
+                    }
                     if (trunk) trunks++;
                     // Farmland inside farm plots is real soil; only open settlement ground must stay bare.
                     boolean open = ground.occupancy()[z * width + x] == 0;
                     if (plant && open) plants++;
                     if ((trunk || plant && open) && rooted.size() < 6) {
-                        rooted.add(x + "," + (y - ground.groundHeights()[z * width + x]) + "," + z + " "
-                                + state.getBlock().getDescriptionId() + " on "
-                                + level.getBlockState(pos.below()).getBlock().getDescriptionId()
-                                + " occupied=" + (ground.occupancy()[z * width + x] != 0)
-                                + " path=" + (ground.pathHeights()[z * width + x] != Integer.MIN_VALUE));
+                        int i = z * width + x;
+                        StringBuilder column = new StringBuilder();
+                        for (int dy = -3; dy <= 2; dy++) {
+                            column.append(' ').append(dy).append('=').append(level.getBlockState(pos.offset(0, dy, 0))
+                                    .getBlock().getDescriptionId().replace("block.minecraft.", ""));
+                        }
+                        List<String> covering = new java.util.ArrayList<>();
+                        for (StructurePiece piece : pieces) {
+                            if (piece instanceof TerrainTemplatePiece building && piece.getBoundingBox().isInside(
+                                    new BlockPos(pos.getX(), piece.getBoundingBox().minY(), pos.getZ()))) {
+                                covering.add(building.template().getSize().toShortString() + "@" + building.rotation()
+                                        + building.getBoundingBox().minX() + "," + building.getBoundingBox().minZ()
+                                        + " foot" + building.footprint());
+                            }
+                        }
+                        rooted.add(x + "," + (y - ground.groundHeights()[i]) + "," + z + " "
+                                + state.getBlock().getDescriptionId() + " occupied=" + (ground.occupancy()[i] != 0)
+                                + " path=" + (ground.pathHeights()[i] != Integer.MIN_VALUE)
+                                + " blend=" + (ground.blendHeights()[i] == Integer.MIN_VALUE ? "-" : ground.blendHeights()[i] - ground.groundHeights()[i])
+                                + " wall=" + (ground.wallHeights()[i] != Integer.MIN_VALUE)
+                                + " chunk=" + new ChunkPos(pos) + " world=" + pos.toShortString() + " column:" + column
+                                + " under " + covering + " refs=" + level.getChunk(pos).getAllReferences().keySet().stream()
+                                .map(structure -> level.registryAccess().registryOrThrow(Registries.STRUCTURE).getKey(structure))
+                                .toList());
                     }
                     if (inner && state.is(BlockTags.LEAVES)) leaves++;
                 }

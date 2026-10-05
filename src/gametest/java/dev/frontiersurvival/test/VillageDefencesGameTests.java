@@ -19,6 +19,7 @@ import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.StructureTags;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.ChunkPos;
@@ -109,21 +110,41 @@ public final class VillageDefencesGameTests {
     }
 
     private static void assertWalls(GameTestHelper helper, ServerLevel level, DefencePlan plan) {
-        int dry = 0, placed = 0;
+        int dry = 0, placed = 0, obstructed = 0;
+        List<String> unexplained = new java.util.ArrayList<>();
         for (int i = 0; i < plan.ring().size(); i++) {
             Cell c = plan.ring().get(i);
             if (plan.gates().contains(c)) continue;
-            int y = level.getHeight(Heightmap.Types.OCEAN_FLOOR, c.x(), c.z()) - 1;
-            BlockPos ground = new BlockPos(c.x(), y, c.z());
-            if (!level.getFluidState(ground).isEmpty()) continue;
+            int surface = level.getHeight(Heightmap.Types.WORLD_SURFACE, c.x(), c.z()) - 1;
+            int floor = level.getHeight(Heightmap.Types.OCEAN_FLOOR, c.x(), c.z()) - 1;
+            boolean wet = false;
+            for (int y = floor; y <= surface + 1; y++) wet |= !level.getFluidState(new BlockPos(c.x(), y, c.z())).isEmpty();
+            if (wet) continue;
             dry++;
-            for (int dy = 0; dy <= 6; dy++) {
-                BlockState post = level.getBlockState(ground.below(dy));
-                if (post.is(plan.palette().palisade().getBlock())) { placed++; break; }
+            BlockPos top = new BlockPos(c.x(), floor, c.z());
+            // Posts stand on the ground, often beneath the canopy of a tree rooted outside the ring.
+            boolean post = false;
+            for (int dy = 0; dy <= 24 && !post; dy++) post = level.getBlockState(top.below(dy)).is(plan.palette().palisade().getBlock());
+            if (post) { placed++; continue; }
+            // A missing post must be explained by something the palisade may not replace: a trunk or a village block.
+            BlockPos ground = top;
+            while (ground.getY() > level.getMinBuildHeight() && (level.getBlockState(ground).is(BlockTags.LEAVES)
+                    || level.getBlockState(ground).canBeReplaced())) ground = ground.below();
+            boolean blocked = level.getBlockState(ground).is(BlockTags.LOGS);
+            for (int h = 1; h <= 5 && !blocked; h++) {
+                BlockState above = level.getBlockState(ground.above(h));
+                blocked = !above.isAir() && !above.canBeReplaced() && !above.is(BlockTags.LEAVES);
             }
+            if (blocked) obstructed++;
+            else if (unexplained.size() < 8) unexplained.add(c + " ground=" + level.getBlockState(ground).getBlock());
+            else unexplained.add("...");
         }
+        FrontierSurvival.LOGGER.info("Village palisade: {} of {} dry ring cells posted, {} obstructed by trees or village blocks",
+                placed, dry, obstructed);
         helper.assertTrue(dry >= 20, "village plan has enough dry wall cells to assess: " + dry);
-        helper.assertTrue(placed * 3 >= dry * 2, "at least two thirds of dry non-gate ring cells carry palisade posts: " + placed + "/" + dry);
+        helper.assertTrue(placed + obstructed == dry && placed * 2 >= dry,
+                "every dry ring cell carries a post unless a trunk or village block stands there: " + placed + " posted, "
+                        + obstructed + " obstructed of " + dry + "; unexplained " + unexplained);
     }
 
     private static void assertTowerArcher(GameTestHelper helper, ServerLevel level, DefencePlan plan) {

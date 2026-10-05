@@ -858,7 +858,11 @@ public final class TerrainGameTests {
         List<BlockState> result = new ArrayList<>();
         for (int z = 0; z < width; z++) {
             for (int x = 0; x < width; x++) {
-                for (int y = -4; y <= top; y++) result.add(level.getBlockState(origin.offset(x, y, z)));
+                for (int y = -4; y <= top; y++) {
+                    BlockState state = level.getBlockState(origin.offset(x, y, z));
+                    // Live-world light and neighbour checks can uproot crops in this harness; worldgen never does.
+                    result.add(state.getBlock() instanceof BushBlock ? Blocks.AIR.defaultBlockState() : state);
+                }
             }
         }
         return result;

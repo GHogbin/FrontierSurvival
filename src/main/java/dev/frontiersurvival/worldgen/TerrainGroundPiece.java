@@ -208,8 +208,8 @@ public final class TerrainGroundPiece extends StructurePiece {
     private static boolean settle(WorldGenLevel level, BoundingBox chunkBox, BlockPos pos) {
         if (!chunkBox.isInside(pos)) return false;
         BlockState turf = settledGround(level.getBlockState(pos));
-        // The exposed ground: a dirt-family block under something plants could occupy.
-        if (turf == null || !level.getBlockState(pos.above()).canBeReplaced()) return false;
+        // The exposed ground: a dirt-family block under air or a plant (flowers are not "replaceable" blocks).
+        if (turf == null || !open(level.getBlockState(pos.above()))) return false;
         level.setBlock(pos, turf, 2);
         // Vegetation spilled from an already decorated neighbouring chunk cannot stay rooted on turf.
         for (int y = 1; y <= 2; y++) {
@@ -219,6 +219,11 @@ public final class TerrainGroundPiece extends StructurePiece {
             }
         }
         return true;
+    }
+
+    /** Space a block could be placed into: air, replaceable cover such as snow or grass, or any small plant. */
+    private static boolean open(BlockState state) {
+        return state.canBeReplaced() || state.getBlock() instanceof BushBlock;
     }
 
     /** The non-dirt turf replacing a dirt-family surface, or null when the surface is already safe. */
@@ -254,7 +259,7 @@ public final class TerrainGroundPiece extends StructurePiece {
         // Carvers and caves can hollow ground after it was sampled; keep paths and wall footings (gravel falls) supported.
         BlockPos.MutableBlockPos below = new BlockPos.MutableBlockPos(originX + x, floorY - 1, originZ + z);
         for (int depth = 0; depth < PATH_SUPPORT && chunkBox.isInside(below)
-                && level.getBlockState(below).canBeReplaced(); depth++, below.move(0, -1, 0)) {
+                && open(level.getBlockState(below)); depth++, below.move(0, -1, 0)) {
             level.setBlock(below, Blocks.DIRT.defaultBlockState(), 2);
         }
     }

@@ -15,6 +15,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.WeakHashMap;
 import javax.annotation.Nullable;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -23,6 +24,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.StructureTags;
 import net.minecraft.util.RandomSource;
@@ -32,9 +34,11 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.WorldGenLevel;
 import net.minecraft.world.level.block.BarrelBlock;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.BushBlock;
 import net.minecraft.world.level.block.HorizontalDirectionalBlock;
 import net.minecraft.world.level.block.LadderBlock;
 import net.minecraft.world.level.block.LanternBlock;
+import net.minecraft.world.level.block.entity.RandomizableContainerBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.chunk.ChunkAccess;
@@ -59,7 +63,15 @@ public final class VillageDefences {
     public static final DeferredRegister<Feature<?>> FEATURES = DeferredRegister.create(ForgeRegistries.FEATURES, FrontierSurvival.ID);
     public static final RegistryObject<Feature<NoneFeatureConfiguration>> VILLAGE_DEFENCES = FEATURES.register("village_defences",
             () -> new VillageDefenceFeature(NoneFeatureConfiguration.CODEC));
-    private static final Map<StructureStart, DefencePlan> CACHE = Collections.synchronizedMap(new IdentityHashMap<>());
+    /** Plans are pure functions of a village's pieces; weak keys let unloaded villages be forgotten. */
+    private static final Map<StructureStart, DefencePlan> CACHE = Collections.synchronizedMap(new WeakHashMap<>());
+    /**
+     * Chunks within this radius of the world origin are left undefended. Only the GameTest run sets it, so village
+     * garrisons never wander into the unrelated test arenas built there.
+     */
+    private static final int CLEAR_RADIUS_CHUNKS = Integer.getInteger("frontiersurvival.villageDefences.clearRadiusChunks", 0);
+    private static final ResourceLocation STALL_SUPPLIES =
+            ResourceLocation.fromNamespaceAndPath(FrontierSurvival.ID, "chests/hamlet_supplies");
 
     private VillageDefences() {}
 
@@ -110,7 +122,8 @@ public final class VillageDefences {
         List<Cell> hull = hull(points);
         if (hull.size() < 3) return DefencePlan.empty(palette);
         LinkedHashSet<Cell> ringSet = rasterHull(hull);
-        ringSet.removeIf(cell -> intersectsAny(occupied, cell.x, cell.z, 1));
+        // Only buildings push the ring away; where a street crosses it, the crossing becomes a gate.
+        ringSet.removeIf(cell -> intersectsAny(buildings, cell.x, cell.z, 1));
         List<Cell> ring = sortRing(ringSet, center.getX(), center.getZ());
         if (ring.isEmpty()) return DefencePlan.empty(palette);
 
@@ -146,21 +159,30 @@ public final class VillageDefences {
         for (Gate gate : gateGroups) {
             if (guards.size() >= 4) break;
             Cell mid = gate.mid(ring);
-            guards.add(new Post(inside(mid, center, 3), 10));
+            // Stand just inside the gateway, never on a rooftop or inside a house.
+            for (int distance : new int[]{3, 2, 4, 1}) {
+                Cell spot = inside(mid, center, distance);
+                if (!intersectsAny(buildings, spot.x, spot.z, 0) && !ringSet.contains(spot)) {
+                    guards.add(new Post(spot, 10));
+                    break;
+                }
+            }
         }
 
-        @Nullable Stall stall = findStall(occupied, center, palette);
+        @Nullable Stall stall = findStall(occupied, ringSet, center, palette);
         return new DefencePlan(palette, List.copyOf(ring), Set.copyOf(gates), Set.copyOf(gatePosts),
                 List.copyOf(gateGroups), List.copyOf(towers), List.copyOf(guards), stall,
                 List.copyOf(buildings), List.copyOf(occupied));
     }
 
-    private static @Nullable Stall findStall(List<Box> occupied, BlockPos center, Palette palette) {
+    private static @Nullable Stall findStall(List<Box> occupied, Set<Cell> ring, BlockPos center, Palette palette) {
         int[][] dirs = {{1,0},{-1,0},{0,1},{0,-1},{1,1},{1,-1},{-1,1},{-1,-1}};
         for (int r = 7; r <= 28; r += 3) for (int[] d : dirs) {
             Cell c = new Cell(center.getX() + d[0] * r, center.getZ() + d[1] * r);
             Box area = new Box(c.x - 2, c.z - 2, c.x + 2, c.z + 2);
-            if (oneChunk(area) && !intersectsAnyBox(occupied, area.expand(1))) return new Stall(c, palette);
+            if (oneChunk(area) && !intersectsAnyBox(occupied, area.expand(1)) && !intersectsCells(ring, area.expand(1))) {
+                return new Stall(c, palette);
+            }
         }
         return null;
     }
@@ -274,14 +296,15 @@ public final class VillageDefences {
             try {
                 ChunkPos current = new ChunkPos(context.origin());
                 if (!level.getLevel().dimension().equals(net.minecraft.world.level.Level.OVERWORLD)) return false;
-                if (System.getProperty("forge.enabledGameTestNamespaces", "").contains(FrontierSurvival.ID)
-                        && Math.abs(current.x) < 128 && Math.abs(current.z) < 128) return false;
+                if (Math.abs(current.x) < CLEAR_RADIUS_CHUNKS && Math.abs(current.z) < CLEAR_RADIUS_CHUNKS) return false;
                 var structures = level.registryAccess().registryOrThrow(Registries.STRUCTURE);
                 List<Holder<Structure>> villages = structures.getTag(StructureTags.VILLAGE)
                         .map(named -> named.stream().toList()).orElse(List.of());
                 if (villages.isEmpty()) return false;
                 boolean placed = false;
                 Set<StructureStart> starts = Collections.newSetFromMap(new IdentityHashMap<>());
+                // Every chunk within 8 already has its structure starts while features generate, and a village's
+                // ring stays within about 6 chunks of its start, so this scan sees every village it could touch.
                 for (int cx = current.x - 8; cx <= current.x + 8; cx++) for (int cz = current.z - 8; cz <= current.z + 8; cz++) {
                     ChunkAccess chunk = level.getChunk(cx, cz, ChunkStatus.STRUCTURE_STARTS, false);
                     if (chunk == null) continue;
@@ -290,8 +313,11 @@ public final class VillageDefences {
                         if (start != null && start.isValid()) starts.add(start);
                     }
                 }
-                starts.addAll(level.getLevel().structureManager().startsForStructure(current,
-                        structure -> structures.wrapAsHolder(structure).is(StructureTags.VILLAGE)));
+                // Villages referencing this chunk, resolved through this generation region only (never off-thread).
+                if (level instanceof WorldGenRegion region) {
+                    starts.addAll(region.getLevel().structureManager().forWorldGenRegion(region).startsForStructure(current,
+                            structure -> structures.wrapAsHolder(structure).is(StructureTags.VILLAGE)));
+                }
                 for (StructureStart start : starts) {
                     DefencePlan plan = cachedPlan(level, start);
                     if (!plan.ring.isEmpty()) placed |= placePlan(level, current, plan, context.random());
@@ -314,7 +340,7 @@ public final class VillageDefences {
             boolean post = plan.gatePosts.contains(cell);
             placed |= placeWall(level, cell, plan.palette, post ? 5 : (i % 8 == 0 ? 4 : 3), post || i % 8 == 0);
         }
-        for (Tower tower : plan.towers) if (inChunk(chunk, tower.center)) placed |= placeTower(level, tower, plan, random);
+        for (Tower tower : plan.towers) if (inChunk(chunk, tower.center)) placed |= placeTower(level, tower, plan);
         for (Post guard : plan.gateGuards) if (inChunk(chunk, guard.center)) placed |= spawnGuard(level, guard.center, false, guard.radius);
         if (plan.stall != null && inChunk(chunk, plan.stall.center)) placed |= placeStall(level, plan.stall, random);
         return placed;
@@ -322,101 +348,152 @@ public final class VillageDefences {
 
     private static boolean inChunk(ChunkPos chunk, Cell cell) { return (cell.x >> 4) == chunk.x && (cell.z >> 4) == chunk.z; }
 
-    private static int ground(WorldGenLevel level, int x, int z) { return level.getHeight(Heightmap.Types.OCEAN_FLOOR, x, z) - 1; }
+    /** The ground under a column; canopies that neighbouring chunks spread over it are looked through. */
+    private static int ground(WorldGenLevel level, int x, int z) {
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos(x, level.getHeight(Heightmap.Types.OCEAN_FLOOR, x, z) - 1, z);
+        while (pos.getY() > level.getMinBuildHeight() && clearable(level.getBlockState(pos))) pos.move(Direction.DOWN);
+        return pos.getY();
+    }
+
+    /** Air, plants and overhanging leaves may give way to defences; village blocks and other structures never do. */
+    private static boolean clearable(BlockState state) {
+        return state.is(BlockTags.LEAVES) || state.getBlock() instanceof BushBlock
+                || state.canBeReplaced() && state.getFluidState().isEmpty();
+    }
+
     private static boolean wet(WorldGenLevel level, BlockPos ground) {
         return !level.getFluidState(ground).isEmpty() || !level.getFluidState(ground.above()).isEmpty();
     }
+
     private static boolean canReplaceColumn(WorldGenLevel level, BlockPos ground, int height) {
         if (wet(level, ground)) return false;
-        for (int y = 1; y <= height; y++) if (!level.getBlockState(ground.above(y)).canBeReplaced()) return false;
+        for (int y = 1; y <= height; y++) if (!clearable(level.getBlockState(ground.above(y)))) return false;
         return true;
     }
+
     private static boolean placeWall(WorldGenLevel level, Cell c, Palette palette, int height, boolean lantern) {
         BlockPos g = new BlockPos(c.x, ground(level, c.x, c.z), c.z);
-        if (!canReplaceColumn(level, g, height + (lantern ? 1 : 0))) return false;
+        // A neighbouring tree's trunk standing on the line keeps its place; the palisade simply gaps around it.
+        if (level.getBlockState(g).is(BlockTags.LOGS) || !canReplaceColumn(level, g, height + (lantern ? 1 : 0))) return false;
         set(level, g, palette.foundation());
         for (int y = 1; y <= height; y++) set(level, g.above(y), palette.palisade());
         if (lantern) set(level, g.above(height + 1), Blocks.LANTERN.defaultBlockState());
         return true;
     }
+
     private static boolean placeGate(WorldGenLevel level, Cell c, Palette palette) {
         BlockPos g = new BlockPos(c.x, ground(level, c.x, c.z), c.z);
         if (wet(level, g)) return false;
-        BlockState top = level.getBlockState(g);
-        if (top.is(BlockTags.DIRT) || top.is(Blocks.GRASS_BLOCK) || top.canBeReplaced()) set(level, g, palette.path());
-        clearPlant(level, g.above());
+        // Village roads keep their own surface; open ground in a gateway becomes trodden path.
+        if (level.getBlockState(g).is(BlockTags.DIRT)) set(level, g, palette.path());
+        for (int y = 1; y <= 4; y++) {
+            if (clearable(level.getBlockState(g.above(y)))) set(level, g.above(y), Blocks.AIR.defaultBlockState());
+        }
         return true;
     }
-    private static void clearPlant(WorldGenLevel level, BlockPos pos) { if (level.getBlockState(pos).canBeReplaced()) set(level, pos, Blocks.AIR.defaultBlockState()); }
 
-    private static boolean placeTower(WorldGenLevel level, Tower tower, DefencePlan plan, RandomSource random) {
-        int[] ys = new int[25]; int i = 0, min = Integer.MAX_VALUE, max = Integer.MIN_VALUE;
+    /**
+     * A roofed 5x5 lookout: walled ground floor with a doorway toward the village and arrow slits, a ladder against
+     * the back wall up through a full deck, a fenced parapet and a slab roof on corner posts. An archer holds the deck.
+     */
+    private static boolean placeTower(WorldGenLevel level, Tower tower, DefencePlan plan) {
+        int[] ys = new int[25];
+        int i = 0, min = Integer.MAX_VALUE, max = Integer.MIN_VALUE;
         for (int dx = -2; dx <= 2; dx++) for (int dz = -2; dz <= 2; dz++) {
             int y = ground(level, tower.center.x + dx, tower.center.z + dz);
-            BlockPos g = new BlockPos(tower.center.x + dx, y, tower.center.z + dz);
-            if (wet(level, g)) return false;
-            ys[i++] = y; min = Math.min(min, y); max = Math.max(max, y);
+            if (wet(level, new BlockPos(tower.center.x + dx, y, tower.center.z + dz))) return false;
+            ys[i++] = y;
+            min = Math.min(min, y);
+            max = Math.max(max, y);
         }
         if (max - min > 4) return false;
-        java.util.Arrays.sort(ys); int base = ys[12] + 1;
+        java.util.Arrays.sort(ys);
+        int base = ys[12];
+        Palette palette = plan.palette;
         Direction door = facingToward(tower.center, tower.wall).getOpposite();
+        Direction back = door.getOpposite();
+        BlockState planks = palette.planks(), frame = palette.frame(), slab = palette.slab(), air = Blocks.AIR.defaultBlockState();
+        BlockState railX = palette.fence().setValue(BlockStateProperties.EAST, true).setValue(BlockStateProperties.WEST, true);
+        BlockState railZ = palette.fence().setValue(BlockStateProperties.NORTH, true).setValue(BlockStateProperties.SOUTH, true);
         for (int dx = -2; dx <= 2; dx++) for (int dz = -2; dz <= 2; dz++) {
-            int x = tower.center.x + dx, z = tower.center.z + dz, y = ground(level, x, z);
-            for (int fill = y; fill < base; fill++) set(level, new BlockPos(x, fill, z), plan.palette.foundation());
-            set(level, new BlockPos(x, base, z), plan.palette.planks());
-            for (int h = 1; h <= 5; h++) {
-                BlockPos p = new BlockPos(x, base + h, z);
-                boolean corner = Math.abs(dx) == 2 && Math.abs(dz) == 2;
-                boolean edge = Math.abs(dx) == 2 || Math.abs(dz) == 2;
-                boolean doorway = h <= 2 && edge && faces(dx, dz, door) && Math.abs(door.getAxis() == Direction.Axis.X ? dz : dx) <= 0;
-                if (corner) set(level, p, plan.palette.frame());
-                else if (h <= 3 && edge && !doorway) set(level, p, plan.palette.planks());
-                else if (level.getBlockState(p).canBeReplaced()) set(level, p, Blocks.AIR.defaultBlockState());
+            int x = tower.center.x + dx, z = tower.center.z + dz;
+            for (int y = ground(level, x, z); y < base; y++) set(level, new BlockPos(x, y, z), palette.foundation());
+            set(level, new BlockPos(x, base, z), planks);
+            boolean corner = Math.abs(dx) == 2 && Math.abs(dz) == 2;
+            boolean edge = Math.abs(dx) == 2 || Math.abs(dz) == 2;
+            for (int h = 1; h <= 10; h++) {
+                BlockState state;
+                if (h <= 5) state = corner ? frame : edge ? planks : air;
+                else if (h == 6) state = planks;
+                else if (h <= 9) state = corner ? frame : edge && h == 7 ? (Math.abs(dz) == 2 ? railX : railZ) : air;
+                else state = slab;
+                set(level, new BlockPos(x, base + h, z), state);
             }
-            if (Math.abs(dx) <= 1 && Math.abs(dz) <= 1) set(level, new BlockPos(x, base + 6, z), plan.palette.planks());
-            if (Math.abs(dx) == 2 || Math.abs(dz) == 2) set(level, new BlockPos(x, base + 7, z), plan.palette.slab());
         }
-        BlockPos ladder = new BlockPos(tower.center.x + 1, base + 1, tower.center.z + 1);
-        for (int h = 0; h <= 5; h++) set(level, ladder.above(h), Blocks.LADDER.defaultBlockState().setValue(LadderBlock.FACING, Direction.WEST));
-        for (Direction d : Direction.Plane.HORIZONTAL) set(level, new BlockPos(tower.center.x + d.getStepX() * 2, base + 7, tower.center.z + d.getStepZ() * 2), plan.palette.fence());
-        set(level, new BlockPos(tower.center.x, base + 8, tower.center.z), Blocks.LANTERN.defaultBlockState().setValue(LanternBlock.HANGING, true));
-        Cell post = new Cell(tower.center.x, tower.center.z);
-        spawnGuard(level, new Cell(post.x, post.z), true, 4, base + 7);
+        BlockPos doorway = new BlockPos(tower.center.x + door.getStepX() * 2, base + 1, tower.center.z + door.getStepZ() * 2);
+        set(level, doorway, air);
+        set(level, doorway.above(), air);
+        for (Direction side : Direction.Plane.HORIZONTAL) {
+            if (side.getAxis() == door.getAxis()) continue;
+            set(level, new BlockPos(tower.center.x + side.getStepX() * 2, base + 3, tower.center.z + side.getStepZ() * 2), air);
+        }
+        // Rungs hang on the solid back wall and, at deck height, on the deck's back edge.
+        BlockPos ladder = new BlockPos(tower.center.x + back.getStepX(), base + 1, tower.center.z + back.getStepZ());
+        BlockState rung = Blocks.LADDER.defaultBlockState().setValue(LadderBlock.FACING, door);
+        for (int h = 0; h <= 5; h++) set(level, ladder.above(h), rung);
+        set(level, new BlockPos(tower.center.x, base + 9, tower.center.z),
+                Blocks.LANTERN.defaultBlockState().setValue(LanternBlock.HANGING, true));
+        spawnGuard(level, new Cell(tower.center.x, tower.center.z), true, 2, base + 7);
         return true;
     }
-    private static boolean faces(int dx, int dz, Direction d) { return dx == d.getStepX() * 2 || dz == d.getStepZ() * 2; }
+
     private static Direction facingToward(Cell from, Cell to) {
         int dx = to.x - from.x, dz = to.z - from.z;
         return Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? Direction.EAST : Direction.WEST) : (dz > 0 ? Direction.SOUTH : Direction.NORTH);
     }
 
+    /** A canopied market stall on settlement turf with the village charter, stores and a quartermaster. */
     private static boolean placeStall(WorldGenLevel level, Stall stall, RandomSource random) {
-        int[] ys = new int[25]; int i = 0, min = Integer.MAX_VALUE, max = Integer.MIN_VALUE;
+        int[] ys = new int[25];
+        int i = 0, min = Integer.MAX_VALUE, max = Integer.MIN_VALUE;
         for (int dx = -2; dx <= 2; dx++) for (int dz = -2; dz <= 2; dz++) {
             int y = ground(level, stall.center.x + dx, stall.center.z + dz);
-            BlockPos g = new BlockPos(stall.center.x + dx, y, stall.center.z + dz);
-            if (wet(level, g)) return false;
-            ys[i++] = y; min = Math.min(min, y); max = Math.max(max, y);
+            if (wet(level, new BlockPos(stall.center.x + dx, y, stall.center.z + dz))) return false;
+            ys[i++] = y;
+            min = Math.min(min, y);
+            max = Math.max(max, y);
         }
-        int base = max + 1;
+        if (max - min > 8) return false;
+        java.util.Arrays.sort(ys);
+        // Terraced into the slope at the median height: low corners are filled, high ground is cut back.
+        int base = ys[12];
         BlockState turf = FrontierSurvival.SETTLEMENT_GRASS.get().defaultBlockState();
-        if (turf.hasProperty(BlockStateProperties.SNOWY)) turf = turf.setValue(BlockStateProperties.SNOWY, false);
         for (int dx = -2; dx <= 2; dx++) for (int dz = -2; dz <= 2; dz++) {
             int x = stall.center.x + dx, z = stall.center.z + dz;
-            for (int y = ground(level, x, z); y <= base; y++) set(level, new BlockPos(x, y, z), y == base ? turf : stall.palette.foundation());
-            for (int y = 1; y <= 4; y++) clearPlant(level, new BlockPos(x, base + y, z));
+            int y0 = ground(level, x, z);
+            for (int y = y0; y < base; y++) set(level, new BlockPos(x, y, z), stall.palette.foundation());
+            set(level, new BlockPos(x, base, z), turf);
+            for (int y = base + 1; y <= Math.max(base + 4, y0); y++) set(level, new BlockPos(x, y, z), Blocks.AIR.defaultBlockState());
         }
-        for (int dx : new int[]{-2, 2}) for (int dz : new int[]{-2, 2}) for (int h = 1; h <= 3; h++) set(level, new BlockPos(stall.center.x + dx, base + h, stall.center.z + dz), stall.palette.fence());
+        for (int dx : new int[]{-2, 2}) for (int dz : new int[]{-2, 2}) for (int h = 1; h <= 3; h++) {
+            set(level, new BlockPos(stall.center.x + dx, base + h, stall.center.z + dz), stall.palette.fence());
+        }
         BlockState wool = BuiltInRegistries.BLOCK.get(ResourceLocation.withDefaultNamespace(stall.palette.accent().getName() + "_wool")).defaultBlockState();
-        for (int dx = -2; dx <= 2; dx++) for (int dz = -2; dz <= 2; dz++) if (Math.abs(dx) == 2 || Math.abs(dz) == 2 || (dx + dz & 1) == 0) set(level, new BlockPos(stall.center.x + dx, base + 4, stall.center.z + dz), wool);
-        Direction face = Direction.SOUTH;
-        set(level, new BlockPos(stall.center.x - 1, base + 1, stall.center.z), Blocks.BARREL.defaultBlockState().setValue(BarrelBlock.FACING, face));
-        set(level, new BlockPos(stall.center.x, base + 1, stall.center.z), FrontierSurvival.BOARD.get().defaultBlockState());
-        if (level.getBlockEntity(new BlockPos(stall.center.x, base + 1, stall.center.z)) instanceof SettlementBoardBlockEntity board) {
-            board.setVillage();
-            board.register(level.getLevel());
+        for (int dx = -2; dx <= 2; dx++) for (int dz = -2; dz <= 2; dz++) {
+            if (Math.abs(dx) == 2 || Math.abs(dz) == 2 || (dx + dz & 1) == 0) {
+                set(level, new BlockPos(stall.center.x + dx, base + 4, stall.center.z + dz), wool);
+            }
         }
-        set(level, new BlockPos(stall.center.x + 1, base + 1, stall.center.z), Blocks.CHEST.defaultBlockState().setValue(HorizontalDirectionalBlock.FACING, Direction.NORTH));
+        BlockPos barrel = new BlockPos(stall.center.x - 1, base + 1, stall.center.z);
+        set(level, barrel, Blocks.BARREL.defaultBlockState().setValue(BarrelBlock.FACING, Direction.SOUTH));
+        RandomizableContainerBlockEntity.setLootTable(level, random, barrel, STALL_SUPPLIES);
+        BlockPos charter = new BlockPos(stall.center.x, base + 1, stall.center.z);
+        set(level, charter, FrontierSurvival.BOARD.get().defaultBlockState());
+        // The charter registers itself with the settlement record when its chunk loads on the server thread.
+        if (level.getBlockEntity(charter) instanceof SettlementBoardBlockEntity board) board.setVillage();
+        BlockPos chest = new BlockPos(stall.center.x + 1, base + 1, stall.center.z);
+        set(level, chest, Blocks.CHEST.defaultBlockState().setValue(HorizontalDirectionalBlock.FACING, Direction.SOUTH));
+        RandomizableContainerBlockEntity.setLootTable(level, random, chest, STALL_SUPPLIES);
         set(level, new BlockPos(stall.center.x, base + 3, stall.center.z), Blocks.LANTERN.defaultBlockState().setValue(LanternBlock.HANGING, true));
         QuartermasterEntity qm = FrontierSurvival.QUARTERMASTER.get().create(level.getLevel());
         if (qm != null) {
@@ -427,7 +504,6 @@ public final class VillageDefences {
         }
         return true;
     }
-
     private static boolean spawnGuard(WorldGenLevel level, Cell cell, boolean archer, int radius) { return spawnGuard(level, cell, archer, radius, ground(level, cell.x, cell.z) + 1); }
     private static boolean spawnGuard(WorldGenLevel level, Cell cell, boolean archer, int radius, int y) {
         GuardEntity guard = FrontierSurvival.GUARD.get().create(level.getLevel());

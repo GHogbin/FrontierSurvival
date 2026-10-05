@@ -38,6 +38,8 @@ minecraft {
         server { args '--nogui' }
         gameTestServer {
             property 'forge.enabledGameTestNamespaces', 'frontiersurvival'
+            // Test arenas are built near the origin; keep village garrisons out of unrelated combat fixtures.
+            property 'frontiersurvival.villageDefences.clearRadiusChunks', '128'
             mods {
                 frontiersurvival {
                     source sourceSets.gametest
