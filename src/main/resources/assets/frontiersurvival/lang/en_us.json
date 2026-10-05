@@ -20,12 +20,13 @@
   "reputation.frontiersurvival.champion": "Champion",
   "message.frontiersurvival.standing": "%s at %s, %s: reputation %s / 100 (%s).",
   "message.frontiersurvival.changed": "Settlement reputation %s: %s (%s).",
-  "message.frontiersurvival.no_settlement": "No loaded Frontier settlement within 64 blocks. Find a hamlet or watchtower charter.",
+  "message.frontiersurvival.no_settlement": "No loaded Frontier settlement within 64 blocks. Find a hamlet, village, or watchtower charter.",
   "message.frontiersurvival.guard.melee": "I patrol these walls. Help against bandits, and leave the residents unharmed.",
   "message.frontiersurvival.guard.archer": "I cover the approaches. Stay behind the walls when danger comes.",
   "message.frontiersurvival.refused": "Your reputation precedes you. I will not trade until you make amends.",
   "message.frontiersurvival.donation_hint": "Hold 16 wheat, 8 bread, or 3 iron ingots and sneak-right-click me: +5 local trust and 1 emerald, once per settlement per world day.",
   "message.frontiersurvival.donation_used": "You have supplied this settlement today. Return after 24000 world ticks have advanced to the next day.",
   "message.frontiersurvival.donation_done": "Supplies received. One emerald for your trouble; the settlement remembers.",
-  "message.frontiersurvival.help": "Find fortified hamlets and watchtower outposts in new Overworld chunks. Right-click their gold charter or a guard to see local reputation. Quartermasters trade; sneak-right-click with supplies to earn trust. Defeat nearby bandits to earn trust. Harm residents and lose it. Trusted: 20; Champion: 60; trade refusal: -15; Outlaw: -30. /frontier reputation shows nearby standing."
+  "message.frontiersurvival.help": "Find fortified hamlets, defended vanilla villages, and watchtower outposts in new Overworld chunks. Right-click their charter or a guard to see local reputation. Quartermasters trade; sneak-right-click with supplies to earn trust. Defeat nearby bandits to earn trust. Harm residents and lose it. Trusted: 20; Champion: 60; trade refusal: -15; Outlaw: -30. /frontier reputation shows nearby standing.",
+  "settlement.frontiersurvival.village": "Village"
 }

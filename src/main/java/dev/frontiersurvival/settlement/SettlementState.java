@@ -15,6 +15,17 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.level.saveddata.SavedData;
 
 public final class SettlementState extends SavedData {
+    public enum Kind {
+        HAMLET("hamlet"), OUTPOST("outpost"), VILLAGE("village");
+        private final String key;
+        Kind(String key) { this.key = key; }
+        public String key() { return key; }
+        public static Kind fromName(String name, boolean outpost) {
+            for (Kind kind : values()) if (kind.key.equals(name)) return kind;
+            return outpost ? OUTPOST : HAMLET;
+        }
+    }
+
     private final Map<BlockPos, Settlement> settlements = new HashMap<>();
 
     public static SettlementState get(ServerLevel level) {
@@ -23,8 +34,16 @@ public final class SettlementState extends SavedData {
     }
 
     public void register(BlockPos center, boolean outpost) {
-        if (!settlements.containsKey(center)) {
-            settlements.put(center.immutable(), new Settlement(outpost));
+        register(center, outpost ? Kind.OUTPOST : Kind.HAMLET);
+    }
+
+    public void register(BlockPos center, Kind kind) {
+        Settlement existing = settlements.get(center);
+        if (existing == null) {
+            settlements.put(center.immutable(), new Settlement(kind));
+            setDirty();
+        } else if (existing.kind != kind) {
+            existing.kind = kind;
             setDirty();
         }
     }
@@ -44,7 +63,11 @@ public final class SettlementState extends SavedData {
     }
 
     public boolean isOutpost(BlockPos center) {
-        return requireSettlement(center).outpost;
+        return kind(center) == Kind.OUTPOST;
+    }
+
+    public Kind kind(BlockPos center) {
+        return requireSettlement(center).kind;
     }
 
     public int score(BlockPos center, UUID player) {
@@ -111,7 +134,7 @@ public final class SettlementState extends SavedData {
         ListTag settlements = tag.getList("Settlements", Tag.TAG_COMPOUND);
         for (int i = 0; i < settlements.size(); i++) {
             CompoundTag data = settlements.getCompound(i);
-            Settlement settlement = new Settlement(data.getBoolean("Outpost"));
+            Settlement settlement = new Settlement(Kind.fromName(data.getString("Kind"), data.getBoolean("Outpost")));
             ListTag players = data.getList("Players", Tag.TAG_COMPOUND);
             for (int j = 0; j < players.size(); j++) {
                 CompoundTag person = players.getCompound(j);
@@ -134,7 +157,8 @@ public final class SettlementState extends SavedData {
         settlements.forEach((center, settlement) -> {
             CompoundTag data = new CompoundTag();
             data.putLong("Center", center.asLong());
-            data.putBoolean("Outpost", settlement.outpost);
+            data.putBoolean("Outpost", settlement.kind == Kind.OUTPOST);
+            data.putString("Kind", settlement.kind.key);
             ListTag players = new ListTag();
             settlement.players.forEach((id, standing) -> {
                 CompoundTag person = new CompoundTag();
@@ -154,9 +178,9 @@ public final class SettlementState extends SavedData {
     }
 
     private static final class Settlement {
-        private final boolean outpost;
+        private Kind kind;
         private final Map<UUID, Standing> players = new HashMap<>();
-        private Settlement(boolean outpost) { this.outpost = outpost; }
+        private Settlement(Kind kind) { this.kind = kind; }
     }
 
     private static final class Standing {

@@ -1,0 +1,6 @@
+{
+  "type": "forge:add_features",
+  "biomes": "#minecraft:is_overworld",
+  "features": "frontiersurvival:village_defences",
+  "step": "surface_structures"
+}

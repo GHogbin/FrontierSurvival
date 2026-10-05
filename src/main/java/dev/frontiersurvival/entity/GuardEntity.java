@@ -49,6 +49,8 @@ public final class GuardEntity extends PathfinderMob implements RangedAttackMob 
     private final MeleeAttackGoal melee = new MeleeAttackGoal(this, 1.1, false);
     private final RangedBowAttackGoal<GuardEntity> ranged = new RangedBowAttackGoal<>(this, 1, 35, 18);
     private @Nullable BlockPos home;
+    private @Nullable BlockPos post;
+    private int postRadius;
     private boolean homeBound;
     private boolean roleAssigned;
 
@@ -100,15 +102,31 @@ public final class GuardEntity extends PathfinderMob implements RangedAttackMob 
     }
 
     public void bindHome(BlockPos position) {
+        if (post != null) return;
         home = position.immutable();
         homeBound = true;
         restrictTo(home, 36);
         setPersistenceRequired();
     }
 
+    public void holdPost(BlockPos position, int radius) {
+        post = position.immutable();
+        postRadius = Math.max(1, radius);
+        restrictTo(post, postRadius);
+        setPersistenceRequired();
+    }
+
+    public boolean hasPost() { return post != null; }
+    public @Nullable BlockPos post() { return post; }
+    public int postRadius() { return postRadius; }
+
     @Override
     public void aiStep() {
         super.aiStep();
+        if (post != null) {
+            if (tickCount % 40 == 0) restrictTo(post, postRadius);
+            return;
+        }
         if (homeBound && home == null && tickCount % 20 == 0 && level() instanceof ServerLevel server) {
             SettlementState.get(server).nearest(server, blockPosition(), 64).ifPresent(this::bindHome);
         }
@@ -149,6 +167,10 @@ public final class GuardEntity extends PathfinderMob implements RangedAttackMob 
         tag.putBoolean("Archer", isArcher());
         tag.putBoolean("HomeBound", homeBound);
         if (home != null) tag.putLong("SettlementHome", home.asLong());
+        if (post != null) {
+            tag.putLong("Post", post.asLong());
+            tag.putInt("PostRadius", postRadius);
+        }
     }
 
     @Override
@@ -156,7 +178,9 @@ public final class GuardEntity extends PathfinderMob implements RangedAttackMob 
         super.readAdditionalSaveData(tag);
         setArcher(tag.getBoolean("Archer"));
         homeBound = tag.getBoolean("HomeBound");
-        if (tag.contains("SettlementHome")) bindHome(BlockPos.of(tag.getLong("SettlementHome")));
+        if (tag.contains("Post")) holdPost(BlockPos.of(tag.getLong("Post")),
+                tag.contains("PostRadius") ? tag.getInt("PostRadius") : 8);
+        else if (tag.contains("SettlementHome")) bindHome(BlockPos.of(tag.getLong("SettlementHome")));
     }
 
     @Override
