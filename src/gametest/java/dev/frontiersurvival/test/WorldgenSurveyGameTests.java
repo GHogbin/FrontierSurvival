@@ -1,10 +1,13 @@
 package dev.frontiersurvival.test;
 
 import dev.frontiersurvival.FrontierSurvival;
+import dev.frontiersurvival.worldgen.Palette;
 import dev.frontiersurvival.worldgen.TerrainPlanner;
 import dev.frontiersurvival.worldgen.TerrainSampler;
 import dev.frontiersurvival.worldgen.TerrainSettlementStructure;
+import dev.frontiersurvival.worldgen.TerrainTemplatePiece;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -21,6 +24,7 @@ import net.minecraft.world.level.NoiseColumn;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.MultiNoiseBiomeSource;
 import net.minecraft.world.level.biome.MultiNoiseBiomeSourceParameterLists;
+import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkGeneratorStructureState;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -60,6 +64,8 @@ public final class WorldgenSurveyGameTests {
         helper.assertTrue(set != null && set.placement() instanceof RandomSpreadStructurePlacement, "Shared frontier site grid");
         RandomSpreadStructurePlacement placement = (RandomSpreadStructurePlacement) set.placement();
         Map<String, Integer> totals = new TreeMap<>();
+        Map<Rotation, Integer> facings = new EnumMap<>(Rotation.class);
+        Map<Palette, Integer> palettes = new EnumMap<>(Palette.class);
         for (long seed : SEEDS) {
             MultiNoiseBiomeSource biomes = MultiNoiseBiomeSource.createFromPreset(preset);
             NoiseBasedChunkGenerator generator = new NoiseBasedChunkGenerator(biomes, settings);
@@ -113,6 +119,13 @@ public final class WorldgenSurveyGameTests {
                             var box = start.getBoundingBox();
                             found.add(new Found(box.getCenter().getX(), box.getCenter().getZ(),
                                     Math.max(box.getXSpan(), box.getZSpan()) / 2));
+                            for (var piece : start.getPieces()) {
+                                if (piece instanceof TerrainTemplatePiece building) {
+                                    facings.merge(building.rotation(), 1, Integer::sum);
+                                    palettes.merge(building.palette(), 1, Integer::sum);
+                                    break;
+                                }
+                            }
                             break;
                         }
                         if (structure.biomes().contains(biome) && structure instanceof TerrainSettlementStructure terrain) {
@@ -138,13 +151,25 @@ public final class WorldgenSurveyGameTests {
                     placement.spacing(), String.format("%.1f", Math.pow(2.0 * HALF_SIZE / 1000.0, 2)), candidates, excluded,
                     anyBiome, generated, overlaps, String.format("%.1f", nanos / 1e6 / Math.max(1, attempts)), siteReasons);
             helper.assertTrue(overlaps == 0, "Frontier sites never overlap one another");
-            // Regression floor: roughly half the measured density, per 3 km x 3 km default world.
-            helper.assertTrue(generated.getOrDefault("terrain_fortified_hamlet", 0) >= 10, "Hamlets are common enough to find");
-            helper.assertTrue(generated.getOrDefault("terrain_bandit_camp", 0) >= 15, "Bandit camps are common enough to find");
-            helper.assertTrue(generated.getOrDefault("terrain_watchtower", 0) >= 20, "Watchtowers are common enough to find");
+            // Regression floor: roughly half the measured density of each kind (all sizes), per 3 km x 3 km world.
+            helper.assertTrue(kind(generated, "hamlet") >= 10, "Hamlets are common enough to find");
+            helper.assertTrue(kind(generated, "camp") >= 15, "Bandit camps are common enough to find");
+            helper.assertTrue(kind(generated, "watchtower") >= 20, "Watchtowers are common enough to find");
         }
-        FrontierSurvival.LOGGER.info("Survey totals over {} seeds: {}", SEEDS.length, totals);
+        int sites = facings.values().stream().mapToInt(Integer::intValue).sum();
+        FrontierSurvival.LOGGER.info("Survey totals over {} seeds: {}; facings {}; palettes {}", SEEDS.length, totals,
+                facings, palettes);
+        for (Rotation rotation : Rotation.values()) {
+            helper.assertTrue(facings.getOrDefault(rotation, 0) * 100 >= sites * 12,
+                    "Sites face every direction, not one fixed layout: " + facings);
+        }
+        helper.assertTrue(palettes.size() >= 3, "Different regions build in different materials: " + palettes);
         helper.succeed();
+    }
+
+    private static int kind(Map<String, Integer> generated, String kind) {
+        return generated.entrySet().stream().filter(entry -> entry.getKey().contains(kind))
+                .mapToInt(Map.Entry::getValue).sum();
     }
 
     @GameTest(template = "test/arena", batch = "sampler", timeoutTicks = 200)

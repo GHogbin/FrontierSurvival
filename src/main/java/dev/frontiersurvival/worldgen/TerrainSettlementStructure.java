@@ -8,6 +8,7 @@ import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -15,10 +16,14 @@ import java.util.TreeMap;
 import java.util.WeakHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.QuartPos;
+import net.minecraft.core.Vec3i;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.Rotation;
+import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructureType;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
@@ -39,7 +44,8 @@ public final class TerrainSettlementStructure extends Structure {
     /** Candidate sites around the start chunk, nearest first; the lowest-earthworks valid site wins. */
     private static final int[][] SITE_OFFSETS = {
             {0, 0}, {12, 0}, {-12, 0}, {0, 12}, {0, -12}, {12, 12}, {-12, 12}, {12, -12}, {-12, -12}};
-    private static final Map<StructureTemplate, Shape> SHAPES = Collections.synchronizedMap(new WeakHashMap<>());
+    /** Per template, its solid/air shape for each rotation ordinal, normalised to the turned box's min corner. */
+    private static final Map<StructureTemplate, Shape[]> SHAPES = Collections.synchronizedMap(new WeakHashMap<>());
 
     private final int width;
     private final List<TerrainPlanner.Plot> plots;
@@ -66,7 +72,9 @@ public final class TerrainSettlementStructure extends Structure {
                 : DataResult.error(() -> "Invalid or overlapping terrain settlement footprint");
     }
 
-    private record Site(int originX, int originZ, TerrainPlanner.Plan plan, int earthworks) {}
+    /** The chosen site: grid origin, plan of the turned layout, its earthworks, facing and regional materials. */
+    public record Site(int originX, int originZ, TerrainPlanner.Plan plan, int earthworks, Rotation rotation,
+                       Palette palette) {}
 
     @Override
     protected Optional<GenerationStub> findGenerationPoint(GenerationContext context) {
@@ -78,18 +86,24 @@ public final class TerrainSettlementStructure extends Structure {
         BlockPos center = new BlockPos(best.originX() + width / 2, plan.ground(width / 2, width / 2),
                 best.originZ() + width / 2);
         return Optional.of(new GenerationStub(center, builder -> {
-            builder.addPiece(new TerrainGroundPiece(origin, plan));
+            builder.addPiece(new TerrainGroundPiece(origin, plan, best.palette()));
             for (TerrainPlanner.Building building : plan.buildings()) {
-                builder.addPiece(new TerrainTemplatePiece(context.structureTemplateManager(), origin, plan, building));
+                builder.addPiece(new TerrainTemplatePiece(context.structureTemplateManager(), origin, plan, building,
+                        best.rotation(), best.palette()));
             }
         }));
     }
 
-    /** Counts why each nearby candidate site was accepted or rejected; used to tune natural frequency. */
+    /** Counts why each nearby candidate site and facing was accepted or rejected; used to tune frequency. */
     public Map<String, Integer> diagnose(GenerationContext context) {
         Map<String, Integer> reasons = new TreeMap<>();
         chooseSite(context, reasons);
         return reasons;
+    }
+
+    /** The site, facing and palette this structure would choose for the context's chunk, if any. */
+    public Optional<Site> site(GenerationContext context) {
+        return chooseSite(context, null);
     }
 
     private Optional<Site> chooseSite(GenerationContext context, Map<String, Integer> reasons) {
@@ -100,6 +114,13 @@ public final class TerrainSettlementStructure extends Structure {
         if (!biomeAllows(context, terrain, centerX, centerZ)) {
             count(reasons, "biome");
             return Optional.empty();
+        }
+        // Every quarter turn is tried; on equal earthworks the per-chunk shuffled order picks the facing.
+        List<Rotation> rotations = Rotation.getShuffled(context.random());
+        Map<ResourceLocation, Vec3i> sizes = templateSizes(context.structureTemplateManager());
+        List<TerrainLayout> layouts = new ArrayList<>(rotations.size());
+        for (Rotation rotation : rotations) {
+            layouts.add(TerrainLayout.rotate(width, plots, paths, walls, rotation, sizes::get));
         }
         int minY = context.heightAccessor().getMinBuildHeight();
         int maxY = context.heightAccessor().getMaxBuildHeight();
@@ -112,30 +133,53 @@ public final class TerrainSettlementStructure extends Structure {
                 continue;
             }
             TerrainPlanner.Sampler sampler = (x, z) -> terrain.sample(originX + x, originZ + z);
-            String early = preflight(sampler, minY, maxY);
-            if (early != null) {
-                count(reasons, early);
-                continue;
+            for (TerrainLayout layout : layouts) {
+                String early = preflight(layout.plots(), sampler, minY, maxY);
+                if (early != null) {
+                    count(reasons, early);
+                    continue;
+                }
+                TerrainPlanner.Evaluation evaluation = TerrainPlanner.evaluate(width, layout.plots(), layout.paths(),
+                        layout.walls(), sampler, minY, maxY);
+                if (evaluation.plan().isEmpty()) {
+                    count(reasons, evaluation.rejection());
+                    continue;
+                }
+                TerrainPlanner.Plan plan = evaluation.plan().get();
+                if (!templatesFit(plan, context, layout.rotation())) {
+                    count(reasons, "template-fit");
+                    continue;
+                }
+                if (!geometryFits(plan, context.structureTemplateManager(), layout.rotation())) {
+                    count(reasons, "geometry");
+                    continue;
+                }
+                count(reasons, "valid");
+                int earthworks = plan.earthworks();
+                if (best == null || earthworks < best.earthworks()) {
+                    best = new Site(originX, originZ, plan, earthworks, layout.rotation(), Palette.OAK);
+                }
             }
-            TerrainPlanner.Evaluation evaluation = TerrainPlanner.evaluate(width, plots, paths, walls, sampler, minY, maxY);
-            if (evaluation.plan().isEmpty()) {
-                count(reasons, evaluation.rejection());
-                continue;
-            }
-            TerrainPlanner.Plan plan = evaluation.plan().get();
-            if (!templatesFit(plan, context)) {
-                count(reasons, "template-fit");
-                continue;
-            }
-            if (!geometryFits(plan, context.structureTemplateManager())) {
-                count(reasons, "geometry");
-                continue;
-            }
-            count(reasons, "valid");
-            int earthworks = plan.earthworks();
-            if (best == null || earthworks < best.earthworks()) best = new Site(originX, originZ, plan, earthworks);
         }
-        return Optional.ofNullable(best);
+        if (best == null) return Optional.empty();
+        int x = best.originX() + width / 2;
+        int z = best.originZ() + width / 2;
+        Palette palette = Palette.forBiome(context.biomeSource().getNoiseBiome(QuartPos.fromBlock(x),
+                QuartPos.fromBlock(best.plan().ground(width / 2, width / 2)), QuartPos.fromBlock(z),
+                context.randomState().sampler()));
+        return Optional.of(new Site(best.originX(), best.originZ(), best.plan(), best.earthworks(), best.rotation(), palette));
+    }
+
+    private Map<ResourceLocation, Vec3i> templateSizes(StructureTemplateManager manager) {
+        Map<ResourceLocation, Vec3i> sizes = new HashMap<>();
+        for (TerrainPlanner.Plot plot : plots) {
+            sizes.computeIfAbsent(plot.template(), location -> template(manager, location).getSize());
+        }
+        return sizes;
+    }
+
+    private static StructureTemplate template(StructureTemplateManager manager, ResourceLocation location) {
+        return manager.get(location).orElseThrow(() -> new IllegalStateException("Missing terrain component " + location));
     }
 
     private static void count(Map<String, Integer> reasons, String reason) {
@@ -149,12 +193,10 @@ public final class TerrainSettlementStructure extends Structure {
                 QuartPos.fromBlock(sample.groundY()), QuartPos.fromBlock(z), context.randomState().sampler()));
     }
 
-    private boolean templatesFit(TerrainPlanner.Plan plan, GenerationContext context) {
+    private boolean templatesFit(TerrainPlanner.Plan plan, GenerationContext context, Rotation rotation) {
         for (TerrainPlanner.Building building : plan.buildings()) {
             TerrainPlanner.Plot plot = building.plot();
-            StructureTemplate template = context.structureTemplateManager().get(plot.template()).orElseThrow(
-                    () -> new IllegalStateException("Missing terrain component " + plot.template()));
-            var size = template.getSize();
+            Vec3i size = template(context.structureTemplateManager(), plot.template()).getSize(rotation);
             if (size.getY() < 2 || plot.x() + size.getX() > width || plot.z() + size.getZ() > width
                     || plot.groundX() + plot.groundWidth() > size.getX()
                     || plot.groundZ() + plot.groundDepth() > size.getZ()
@@ -167,13 +209,16 @@ public final class TerrainSettlementStructure extends Structure {
 
     /** Rejects independent elevations that would make one component's roof or wall clip another's room. */
     public boolean geometryFits(TerrainPlanner.Plan plan, StructureTemplateManager manager) {
+        return geometryFits(plan, manager, Rotation.NONE);
+    }
+
+    /** As {@link #geometryFits(TerrainPlanner.Plan, StructureTemplateManager)} for a plan of a turned layout. */
+    public boolean geometryFits(TerrainPlanner.Plan plan, StructureTemplateManager manager, Rotation rotation) {
         Long2ObjectOpenHashMap<Block> solid = new Long2ObjectOpenHashMap<>();
         LongOpenHashSet clearing = new LongOpenHashSet();
         for (TerrainPlanner.Building building : plan.buildings()) {
             TerrainPlanner.Plot plot = building.plot();
-            StructureTemplate template = manager.get(plot.template()).orElseThrow(
-                    () -> new IllegalStateException("Missing terrain component " + plot.template()));
-            Shape shape = SHAPES.computeIfAbsent(template, TerrainSettlementStructure::shape);
+            Shape shape = shape(template(manager, plot.template()), rotation);
             for (int i = 0; i < shape.solid().length; i++) {
                 long position = BlockPos.offset(shape.solid()[i], plot.x(), building.floorY(), plot.z());
                 if (clearing.contains(position)) return false;
@@ -191,18 +236,32 @@ public final class TerrainSettlementStructure extends Structure {
 
     private record Shape(long[] solid, Block[] blocks, long[] air) {}
 
-    private static Shape shape(StructureTemplate template) {
+    private static Shape shape(StructureTemplate template, Rotation rotation) {
+        Shape[] shapes = SHAPES.computeIfAbsent(template, key -> new Shape[Rotation.values().length]);
+        synchronized (shapes) {
+            Shape shape = shapes[rotation.ordinal()];
+            if (shape == null) {
+                shape = computeShape(template, rotation);
+                shapes[rotation.ordinal()] = shape;
+            }
+            return shape;
+        }
+    }
+
+    private static Shape computeShape(StructureTemplate template, Rotation rotation) {
         LongArrayList solid = new LongArrayList();
         List<Block> blocks = new ArrayList<>();
         LongArrayList air = new LongArrayList();
-        StructurePlaceSettings settings = new StructurePlaceSettings().setRandom(RandomSource.create(0));
+        StructurePlaceSettings settings = new StructurePlaceSettings().setRotation(rotation).setRandom(RandomSource.create(0));
+        BoundingBox box = template.getBoundingBox(settings, BlockPos.ZERO);
         for (Block block : BuiltInRegistries.BLOCK) {
             if (block == Blocks.STRUCTURE_VOID) continue;
             for (var info : template.filterBlocks(BlockPos.ZERO, settings, block)) {
+                long position = BlockPos.asLong(info.pos().getX() - box.minX(), info.pos().getY(), info.pos().getZ() - box.minZ());
                 if (block == Blocks.AIR) {
-                    air.add(info.pos().asLong());
+                    air.add(position);
                 } else {
-                    solid.add(info.pos().asLong());
+                    solid.add(position);
                     blocks.add(block);
                 }
             }
@@ -210,7 +269,7 @@ public final class TerrainSettlementStructure extends Structure {
         return new Shape(solid.toLongArray(), blocks.toArray(Block[]::new), air.toLongArray());
     }
 
-    private String preflight(TerrainPlanner.Sampler sampler, int minY, int maxY) {
+    private static String preflight(List<TerrainPlanner.Plot> plots, TerrainPlanner.Sampler sampler, int minY, int maxY) {
         for (TerrainPlanner.Plot plot : plots) {
             int x = plot.minX(), z = plot.minZ();
             int maxX = x + plot.groundWidth() - 1, maxZ = z + plot.groundDepth() - 1;

@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.block.Rotation;
 
 /** Plans against a single immutable snapshot of natural ground, never against placed structures. */
 public final class TerrainPlanner {
@@ -60,14 +61,32 @@ public final class TerrainPlanner {
                 cell -> List.of(cell.x, cell.z));
     }
 
-    public record Walls(int min, int max, int gateStart, int gateEnd, boolean northGate) {
+    public record Walls(int min, int max, int gateStart, int gateEnd, int sides) {
+        public static final int SOUTH = 1;
+        public static final int NORTH = 2;
+        public static final int EAST = 4;
+        public static final int WEST = 8;
         public static final Codec<Walls> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.intRange(0, MAX_WIDTH - 1).fieldOf("min").forGetter(Walls::min),
                 Codec.intRange(0, MAX_WIDTH - 1).fieldOf("max").forGetter(Walls::max),
                 Codec.intRange(0, MAX_WIDTH - 1).fieldOf("gate_start").forGetter(Walls::gateStart),
                 Codec.intRange(0, MAX_WIDTH - 1).fieldOf("gate_end").forGetter(Walls::gateEnd),
-                Codec.BOOL.fieldOf("north_gate").forGetter(Walls::northGate)
-        ).apply(instance, Walls::new));
+                Codec.BOOL.fieldOf("north_gate").forGetter(Walls::northGate),
+                Codec.BOOL.optionalFieldOf("south_gate", true).forGetter(Walls::southGate),
+                Codec.BOOL.optionalFieldOf("east_gate", false).forGetter(Walls::eastGate),
+                Codec.BOOL.optionalFieldOf("west_gate", false).forGetter(Walls::westGate)
+        ).apply(instance, (min, max, start, end, north, south, east, west) -> new Walls(min, max, start, end,
+                (south ? SOUTH : 0) | (north ? NORTH : 0) | (east ? EAST : 0) | (west ? WEST : 0))));
+
+        /** The original south gate, plus an optional north gate. */
+        public Walls(int min, int max, int gateStart, int gateEnd, boolean northGate) {
+            this(min, max, gateStart, gateEnd, SOUTH | (northGate ? NORTH : 0));
+        }
+
+        public boolean northGate() { return (sides & NORTH) != 0; }
+        public boolean southGate() { return (sides & SOUTH) != 0; }
+        public boolean eastGate() { return (sides & EAST) != 0; }
+        public boolean westGate() { return (sides & WEST) != 0; }
 
         public boolean perimeter(int x, int z) {
             return x >= min && x <= max && z >= min && z <= max
@@ -75,7 +94,32 @@ public final class TerrainPlanner {
         }
 
         public boolean gate(int x, int z) {
-            return x >= gateStart && x <= gateEnd && (z == max || northGate && z == min);
+            boolean alongX = x >= gateStart && x <= gateEnd;
+            boolean alongZ = z >= gateStart && z <= gateEnd;
+            return southGate() && z == max && alongX || northGate() && z == min && alongX
+                    || eastGate() && x == max && alongZ || westGate() && x == min && alongZ;
+        }
+
+        /** Centred rings map onto themselves under a quarter turn; only the gated sides move. */
+        public Walls rotate(Rotation rotation) {
+            int rotated = 0;
+            for (int side : new int[]{SOUTH, WEST, NORTH, EAST}) {
+                if ((sides & side) != 0) rotated |= rotateSide(side, rotation);
+            }
+            return new Walls(min, max, gateStart, gateEnd, rotated);
+        }
+
+        private static int rotateSide(int side, Rotation rotation) {
+            // Clockwise order seen from above with +z as south: south -> west -> north -> east.
+            int[] order = {SOUTH, WEST, NORTH, EAST};
+            int index = side == SOUTH ? 0 : side == WEST ? 1 : side == NORTH ? 2 : 3;
+            int steps = switch (rotation) {
+                case NONE -> 0;
+                case CLOCKWISE_90 -> 1;
+                case CLOCKWISE_180 -> 2;
+                case COUNTERCLOCKWISE_90 -> 3;
+            };
+            return order[(index + steps) % 4];
         }
     }
 
@@ -262,9 +306,10 @@ public final class TerrainPlanner {
         boolean[] pathNodes = new boolean[size];
         for (Cell cell : pathCells) pathNodes[cell.z * width + cell.x] = true;
         walls.ifPresent(wall -> {
-            for (int x = wall.gateStart; x <= wall.gateEnd; x++) {
-                pathNodes[wall.max * width + x] = true;
-                if (wall.northGate) pathNodes[wall.min * width + x] = true;
+            for (int z = wall.min; z <= wall.max; z++) {
+                for (int x = wall.min; x <= wall.max; x++) {
+                    if (wall.perimeter(x, z) && wall.gate(x, z)) pathNodes[z * width + x] = true;
+                }
             }
         });
         int[] anchors = absent(size);

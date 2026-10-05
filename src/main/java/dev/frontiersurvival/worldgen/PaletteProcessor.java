@@ -5,6 +5,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.LevelReader;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureProcessor;
@@ -30,6 +31,8 @@ public final class PaletteProcessor extends StructureProcessor {
                                                              StructureTemplate.StructureBlockInfo info,
                                                              StructurePlaceSettings settings) {
         BlockState mapped = palette.apply(info.state());
+        // Any grass authored into a template is laid as settlement turf, so nothing can take root on it.
+        if (mapped.is(Blocks.GRASS_BLOCK)) mapped = TerrainGroundPiece.settledGround(mapped);
         return mapped == info.state() ? info : new StructureTemplate.StructureBlockInfo(info.pos(), mapped, info.nbt());
     }
 
