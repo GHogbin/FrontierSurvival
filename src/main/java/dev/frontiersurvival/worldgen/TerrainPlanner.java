@@ -22,6 +22,9 @@ public final class TerrainPlanner {
     /** Blending never moves ground further than this; steeper natural drops or cave mouths are left as they are. */
     public static final int MAX_BLEND_CHANGE = MAX_FOOTPRINT_RELIEF;
     public static final int ABSENT = Integer.MIN_VALUE;
+    /** Settlement grids are square; small lookouts to large walled hamlets fit inside these bounds. */
+    public static final int MIN_WIDTH = 9;
+    public static final int MAX_WIDTH = 63;
     private static final byte BUILDING = 1;
     private static final byte PATH = 2;
     private static final byte WALL = 4;
@@ -30,12 +33,12 @@ public final class TerrainPlanner {
                        int groundWidth, int groundDepth, List<Cell> entrances) {
         public static final Codec<Plot> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 ResourceLocation.CODEC.fieldOf("template").forGetter(Plot::template),
-                Codec.intRange(0, 38).fieldOf("x").forGetter(Plot::x),
-                Codec.intRange(0, 38).fieldOf("z").forGetter(Plot::z),
-                Codec.intRange(0, 38).fieldOf("ground_x").forGetter(Plot::groundX),
-                Codec.intRange(0, 38).fieldOf("ground_z").forGetter(Plot::groundZ),
-                Codec.intRange(1, 39).fieldOf("ground_width").forGetter(Plot::groundWidth),
-                Codec.intRange(1, 39).fieldOf("ground_depth").forGetter(Plot::groundDepth),
+                Codec.intRange(0, MAX_WIDTH - 1).fieldOf("x").forGetter(Plot::x),
+                Codec.intRange(0, MAX_WIDTH - 1).fieldOf("z").forGetter(Plot::z),
+                Codec.intRange(0, MAX_WIDTH - 1).fieldOf("ground_x").forGetter(Plot::groundX),
+                Codec.intRange(0, MAX_WIDTH - 1).fieldOf("ground_z").forGetter(Plot::groundZ),
+                Codec.intRange(1, MAX_WIDTH).fieldOf("ground_width").forGetter(Plot::groundWidth),
+                Codec.intRange(1, MAX_WIDTH).fieldOf("ground_depth").forGetter(Plot::groundDepth),
                 Cell.CODEC.listOf().optionalFieldOf("entrances", List.of()).forGetter(Plot::entrances)
         ).apply(instance, Plot::new));
 
@@ -59,10 +62,10 @@ public final class TerrainPlanner {
 
     public record Walls(int min, int max, int gateStart, int gateEnd, boolean northGate) {
         public static final Codec<Walls> CODEC = RecordCodecBuilder.create(instance -> instance.group(
-                Codec.intRange(0, 38).fieldOf("min").forGetter(Walls::min),
-                Codec.intRange(0, 38).fieldOf("max").forGetter(Walls::max),
-                Codec.intRange(0, 38).fieldOf("gate_start").forGetter(Walls::gateStart),
-                Codec.intRange(0, 38).fieldOf("gate_end").forGetter(Walls::gateEnd),
+                Codec.intRange(0, MAX_WIDTH - 1).fieldOf("min").forGetter(Walls::min),
+                Codec.intRange(0, MAX_WIDTH - 1).fieldOf("max").forGetter(Walls::max),
+                Codec.intRange(0, MAX_WIDTH - 1).fieldOf("gate_start").forGetter(Walls::gateStart),
+                Codec.intRange(0, MAX_WIDTH - 1).fieldOf("gate_end").forGetter(Walls::gateEnd),
                 Codec.BOOL.fieldOf("north_gate").forGetter(Walls::northGate)
         ).apply(instance, Walls::new));
 
@@ -145,7 +148,7 @@ public final class TerrainPlanner {
     }
 
     public static boolean validLayout(int width, List<Plot> plots, List<Cell> paths, Optional<Walls> walls) {
-        if (width < 13 || width > 39 || plots.isEmpty() || plots.size() > width * width
+        if (width < MIN_WIDTH || width > MAX_WIDTH || plots.isEmpty() || plots.size() > width * width
                 || paths.size() > width * width) return false;
         boolean[] occupied = new boolean[width * width];
         for (Plot plot : plots) {
@@ -176,6 +179,8 @@ public final class TerrainPlanner {
             if (wall.min < 0 || wall.max >= width || wall.min >= wall.max
                     || wall.gateStart <= wall.min || wall.gateEnd >= wall.max
                     || wall.gateEnd - wall.gateStart < 2) return false;
+            // Walls and gates are centred so a quarter turn maps the ring and every gate onto the same grid.
+            if (wall.min + wall.max != width - 1 || wall.gateStart + wall.gateEnd != width - 1) return false;
             for (int z = wall.min; z <= wall.max; z++) {
                 for (int x = wall.min; x <= wall.max; x++) {
                     if (wall.perimeter(x, z) && occupied[z * width + x]) return false;

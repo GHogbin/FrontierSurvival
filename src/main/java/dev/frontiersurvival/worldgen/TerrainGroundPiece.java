@@ -57,7 +57,7 @@ public final class TerrainGroundPiece extends StructurePiece {
             blend = new int[natural.length];
             Arrays.fill(blend, TerrainPlanner.ABSENT);
         }
-        if (width < 13 || width > 39 || natural.length != width * width || occupancy.length != natural.length
+        if (width < TerrainPlanner.MIN_WIDTH || width > TerrainPlanner.MAX_WIDTH || natural.length != width * width || occupancy.length != natural.length
                 || paths.length != natural.length || wallHeights.length != natural.length || blend.length != natural.length) {
             throw new IllegalArgumentException("Invalid saved terrain ground profile");
         }

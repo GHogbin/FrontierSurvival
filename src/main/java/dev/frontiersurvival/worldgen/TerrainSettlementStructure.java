@@ -29,7 +29,7 @@ public final class TerrainSettlementStructure extends Structure {
     public static final Codec<TerrainSettlementStructure> CODEC =
             RecordCodecBuilder.<TerrainSettlementStructure>mapCodec(instance -> instance.group(
                     settingsCodec(instance),
-                    Codec.intRange(13, 39).fieldOf("width").forGetter(TerrainSettlementStructure::width),
+                    Codec.intRange(TerrainPlanner.MIN_WIDTH, TerrainPlanner.MAX_WIDTH).fieldOf("width").forGetter(TerrainSettlementStructure::width),
                     TerrainPlanner.Plot.CODEC.listOf().fieldOf("plots").forGetter(TerrainSettlementStructure::plots),
                     TerrainPlanner.Cell.CODEC.listOf().fieldOf("paths").forGetter(TerrainSettlementStructure::paths),
                     TerrainPlanner.Walls.CODEC.optionalFieldOf("walls").forGetter(TerrainSettlementStructure::walls)

@@ -6,6 +6,7 @@ import dev.frontiersurvival.entity.FrontierArrow;
 import dev.frontiersurvival.entity.GuardEntity;
 import net.minecraft.client.model.HumanoidModel;
 import net.minecraft.client.model.geom.ModelLayers;
+import net.minecraft.client.renderer.BiomeColors;
 import net.minecraft.client.renderer.entity.ArrowRenderer;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.HumanoidMobRenderer;
@@ -14,8 +15,10 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GrassColor;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.EntityRenderersEvent;
+import net.minecraftforge.client.event.RegisterColorHandlersEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
@@ -28,6 +31,19 @@ public final class FrontierClient {
         event.registerEntityRenderer(FrontierSurvival.BANDIT_LEADER.get(), context -> new PersonRenderer<>(context, "bandit_leader"));
         event.registerEntityRenderer(FrontierSurvival.QUARTERMASTER.get(), context -> new PersonRenderer<>(context, "quartermaster"));
         event.registerEntityRenderer(FrontierSurvival.ARROW.get(), FrontierArrowRenderer::new);
+    }
+
+    @SubscribeEvent
+    public static void blockColours(RegisterColorHandlersEvent.Block event) {
+        // Settlement turf takes the local biome's grass tint, exactly like the grass it replaces.
+        event.register((state, level, pos, tint) -> level != null && pos != null
+                ? BiomeColors.getAverageGrassColor(level, pos) : GrassColor.getDefaultColor(),
+                FrontierSurvival.SETTLEMENT_GRASS.get());
+    }
+
+    @SubscribeEvent
+    public static void itemColours(RegisterColorHandlersEvent.Item event) {
+        event.register((stack, tint) -> GrassColor.getDefaultColor(), FrontierSurvival.SETTLEMENT_GRASS_ITEM.get());
     }
 
     private static final class PersonRenderer<T extends Mob> extends HumanoidMobRenderer<T, HumanoidModel<T>> {

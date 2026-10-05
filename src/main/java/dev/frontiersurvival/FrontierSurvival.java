@@ -1,12 +1,14 @@
 package dev.frontiersurvival;
 
 import com.mojang.logging.LogUtils;
+import dev.frontiersurvival.block.SettlementGroundBlock;
 import dev.frontiersurvival.entity.BanditEntity;
 import dev.frontiersurvival.entity.FrontierArrow;
 import dev.frontiersurvival.entity.GuardEntity;
 import dev.frontiersurvival.entity.QuartermasterEntity;
 import dev.frontiersurvival.settlement.SettlementBoardBlock;
 import dev.frontiersurvival.settlement.SettlementBoardBlockEntity;
+import dev.frontiersurvival.village.VillageDefences;
 import dev.frontiersurvival.worldgen.TerrainTypes;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobCategory;
@@ -15,8 +17,11 @@ import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.material.MapColor;
 import net.minecraftforge.common.ForgeSpawnEggItem;
 import net.minecraftforge.event.BuildCreativeModeTabContentsEvent;
 import net.minecraftforge.event.entity.EntityAttributeCreationEvent;
@@ -61,6 +66,12 @@ public final class FrontierSurvival {
                     () -> BlockEntityType.Builder.of(SettlementBoardBlockEntity::new, BOARD.get()).build(null));
     public static final RegistryObject<Item> BOARD_ITEM = ITEMS.register("settlement_board",
             () -> new BlockItem(BOARD.get(), new Item.Properties()));
+    /** Grass-like settlement ground that is not dirt, so generated trees and plants cannot root on it. */
+    public static final RegistryObject<Block> SETTLEMENT_GRASS = BLOCKS.register("settlement_grass",
+            () -> new SettlementGroundBlock(BlockBehaviour.Properties.of().mapColor(MapColor.GRASS)
+                    .strength(0.6F).sound(SoundType.GRASS)));
+    public static final RegistryObject<Item> SETTLEMENT_GRASS_ITEM = ITEMS.register("settlement_grass",
+            () -> new BlockItem(SETTLEMENT_GRASS.get(), new Item.Properties()));
     public static final RegistryObject<Item> GUARD_EGG = ITEMS.register("guard_spawn_egg",
             () -> new ForgeSpawnEggItem(GUARD, 0x355c86, 0xbdc4c9, new Item.Properties()));
     public static final RegistryObject<Item> BANDIT_EGG = ITEMS.register("bandit_spawn_egg",
@@ -77,6 +88,7 @@ public final class FrontierSurvival {
         BLOCKS.register(bus);
         BLOCK_ENTITIES.register(bus);
         TerrainTypes.register(bus);
+        VillageDefences.register(bus);
         bus.addListener(FrontierSurvival::attributes);
         bus.addListener(FrontierSurvival::spawns);
         bus.addListener(FrontierSurvival::creativeTab);
@@ -104,5 +116,6 @@ public final class FrontierSurvival {
             event.accept(MERCHANT_EGG);
         }
         if (event.getTabKey() == CreativeModeTabs.FUNCTIONAL_BLOCKS) event.accept(BOARD_ITEM);
+        if (event.getTabKey() == CreativeModeTabs.NATURAL_BLOCKS) event.accept(SETTLEMENT_GRASS_ITEM);
     }
 }
