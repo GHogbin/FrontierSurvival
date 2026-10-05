@@ -63,6 +63,16 @@ for partially generated older structures. Only newly generated chunks use
 the shared frontier-site grid. Explore NEW chunks or use a new world;
 sites near the edge of already-explored land may be cut off there.
 
+VILLAGES
+Vanilla villages are more common in new Overworld terrain: the village
+structure set keeps the vanilla salt and five village types but uses spacing
+28 / separation 7. New chunks around villages gain a deterministic Frontier
+Survival defence plan: a terrain-following palisade ring, gates where roads
+leave the village, lit gate posts, watchtowers with archer guards, melee gate
+guards, a settlement charter registered as a Village, and a quartermaster
+market stall near the centre. These additions are clipped per chunk, so old
+chunks are not rebuilt and partially explored villages only update in newly
+generated chunks.
 THE FIVE MVP FEATURES
 1. Guards: original blue-uniform melee and bow defenders. 30 health.
    Patrol close to settlements, defend against bandits/other monsters,
@@ -165,3 +175,4 @@ LICENSE
 New source and original generated assets: MIT (see LICENSE).
 Minecraft/Forge remain their respective owners' software; the mod refers
 to vanilla assets at runtime and does not redistribute the game.
+

@@ -56,7 +56,7 @@ public final class Reputation {
         int score = FrontierConfig.REPUTATION.get() ? SettlementState.get(level).score(center, player.getUUID()) : 0;
         player.displayClientMessage(Component.translatable("message.frontiersurvival.standing",
                 Component.translatable("settlement.frontiersurvival."
-                        + (SettlementState.get(level).isOutpost(center) ? "outpost" : "hamlet")),
+                        + SettlementState.get(level).kind(center).key()),
                 center.getX(), center.getZ(), score,
                 Component.translatable("reputation.frontiersurvival." + tier(score))), false);
     }
