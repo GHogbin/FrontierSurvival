@@ -32,6 +32,7 @@ public final class GenerateAssets {
     private static final int DATA_VERSION = 3465;
     private static final int FLOOR = 5;
     private static final State AIR = state("air");
+    private static final State SETTLEMENT_GRASS = state(NS + "settlement_grass", "snowy", "false");
     private static final State COBBLE = state("cobblestone");
     private static final State PLANKS = state("oak_planks");
     private static final State LOG = state("stripped_spruce_log", "axis", "y");
@@ -50,7 +51,7 @@ public final class GenerateAssets {
                 .resolve(table.substring(table.lastIndexOf('/') + 1) + ".json")), "Missing loot table " + table);
         }
 
-        List<Voxels> structures = List.of(hamlet(), watchtower(), camp());
+        List<Voxels> structures = List.of(hamlet(), watchtower(), camp(), hamletSmall(), hamletLarge(), campSmall(), campLarge(), watchtowerSmall(), watchtowerLarge());
         for (Voxels voxels : structures) {
             voxels.validate();
             Path file = data.resolve("structures").resolve(voxels.name + ".nbt");
@@ -66,10 +67,15 @@ public final class GenerateAssets {
             require(block.pos.y == 0 ? block.state.name.equals("minecraft:grass_block")
                 : block.state.equals(AIR), "Unexpected arena obstruction");
         }
-        writeVerified(root.resolve("src").resolve("gametest").resolve("resources").resolve("data")
-            .resolve("frontiersurvival").resolve("structures").resolve("test").resolve("arena.nbt"),
-            arena.template());
+        Path testStructures = root.resolve("src").resolve("gametest").resolve("resources").resolve("data")
+            .resolve("frontiersurvival").resolve("structures").resolve("test");
+        writeVerified(testStructures.resolve("arena.nbt"), arena.template());
         System.out.println("Arena test/arena: 48 x 24 x 48; grass y=0, air y=1..23, zero entities.");
+        Voxels arenaLarge = new Voxels("test/arena_large", 64, 32, 64);
+        arenaLarge.fill(0, 0, 0, 63, 0, 63, state("grass_block", "snowy", "false"));
+        require(arenaLarge.entities.isEmpty(), "Large arena must be empty");
+        writeVerified(testStructures.resolve("arena_large.nbt"), arenaLarge.template());
+        System.out.println("Arena test/arena_large: 64 x 32 x 64; grass y=0, air y=1..31, zero entities.");
 
         Path skins = root.resolve("src").resolve("main").resolve("resources").resolve("assets")
             .resolve("frontiersurvival").resolve("textures").resolve("entity");
@@ -166,7 +172,11 @@ public final class GenerateAssets {
                     v.set(x, 8, z, state("torch"));
                 }, List.of()));
             }
-        } else throw new IllegalArgumentException("Unknown original terrain layout " + original.name);
+        } else {
+            int inset = hasWalls(original.name) ? 2 : 0;
+            plots.add(terrainPlot(original, "site_core", 0, 0, original.width, original.depth,
+                inset, inset, original.width - inset * 2, original.depth - inset * 2, null, List.of()));
+        }
 
         require(plots.stream().mapToInt(plot -> plot.component.entities.size()).sum() == original.entities.size(),
             original.name + ": terrain components must assign every original resident exactly once");
@@ -185,17 +195,18 @@ public final class GenerateAssets {
         for (TerrainPlot plot : plots) {
             for (Pos entrance : plot.entrances) paths.add(new Pos(plot.x + entrance.x, 0, plot.z + entrance.z));
         }
-        int margin = original.name.equals("watchtower") ? 3 : 0;
+        int margin = original.name.equals("watchtower") || original.name.equals("watchtower_small") ? 3 : 0;
         if (margin > 0) {
             // Graded approach from the outpost gate across the blending margin.
+            int center = original.width / 2;
             for (int z = original.depth; z < original.depth + margin; z++) {
-                for (int x = 5; x <= 7; x++) paths.add(new Pos(x, 0, z));
+                for (int x = center - 1; x <= center + 1; x++) paths.add(new Pos(x, 0, z));
             }
         }
         StringBuilder json = new StringBuilder("{\n  \"type\": \"frontiersurvival:terrain_settlement\",\n");
-        json.append("  \"biomes\": \"#frontiersurvival:has_structure/").append(original.name).append("\",\n")
+        json.append("  \"biomes\": \"#frontiersurvival:has_structure/").append(biomeTag(original.name)).append("\",\n")
             .append("  \"step\": \"surface_structures\",\n  \"terrain_adaptation\": \"none\",\n")
-            .append("  \"spawn_overrides\": ").append(original.name.equals("bandit_camp") ? "{}" :
+            .append("  \"spawn_overrides\": ").append(original.name.startsWith("bandit_camp") ? "{}" :
                 "{\"monster\":{\"bounding_box\":\"piece\",\"spawns\":[]}}").append(",\n")
             .append("  \"width\": ").append(original.width + 2 * margin).append(",\n  \"plots\": [\n");
         for (int i = 0; i < plots.size(); i++) {
@@ -219,17 +230,38 @@ public final class GenerateAssets {
             json.append('[').append(pos.x + margin).append(',').append(pos.z + margin).append(']');
         }
         json.append(']');
-        if (!original.name.equals("watchtower")) {
-            boolean hamlet = original.name.equals("fortified_hamlet");
+        if (hasWalls(original.name)) {
+            int gateStart = original.width / 2 - 1;
+            int gateEnd = original.width / 2 + 1;
             json.append(",\n  \"walls\":{\"min\":1,\"max\":").append(original.width - 2)
-                .append(",\"gate_start\":").append(hamlet ? 18 : 10)
-                .append(",\"gate_end\":").append(hamlet ? 20 : 12)
-                .append(",\"north_gate\":").append(hamlet).append('}');
+                .append(",\"gate_start\":").append(gateStart)
+                .append(",\"gate_end\":").append(gateEnd)
+                .append(",\"north_gate\":").append(hasNorthGate(original.name)).append('}');
         }
         json.append("\n}\n");
         Files.writeString(data.resolve("worldgen").resolve("structure").resolve("terrain_" + original.name + ".json"), json);
         System.out.println("Terrain " + original.name + ": " + plots.size() + " grounded plots, " + paths.size()
             + " graded path cells; legacy template preserved.");
+    }
+
+    private static boolean hasWalls(String name) {
+        return name.equals("fortified_hamlet") || name.equals("bandit_camp") || name.equals("hamlet_small")
+            || name.equals("hamlet_large") || name.equals("bandit_camp_large") || name.equals("watchtower_large");
+    }
+
+    private static boolean hasNorthGate(String name) {
+        return name.equals("fortified_hamlet") || name.equals("hamlet_small") || name.equals("hamlet_large")
+            || name.equals("watchtower_large");
+    }
+
+    private static boolean isCrop(String name) {
+        return name.equals("wheat") || name.equals("carrots") || name.equals("potatoes") || name.equals("beetroots");
+    }
+
+    private static String biomeTag(String name) {
+        if (name.startsWith("hamlet") || name.equals("fortified_hamlet")) return "fortified_hamlet";
+        if (name.startsWith("bandit_camp")) return "bandit_camp";
+        return "watchtower";
     }
 
     /**
@@ -242,13 +274,28 @@ public final class GenerateAssets {
             Files.deleteIfExists(sets.resolve(old + ".json"));
         }
         Files.writeString(sets.resolve("frontier_sites.json"), "{\n  \"structures\": [\n"
-            + "    {\"structure\":\"" + NS + "terrain_fortified_hamlet\",\"weight\":4},\n"
-            + "    {\"structure\":\"" + NS + "terrain_bandit_camp\",\"weight\":3},\n"
-            + "    {\"structure\":\"" + NS + "terrain_watchtower\",\"weight\":3}\n  ],\n"
+            + "    {\"structure\":\"" + NS + "terrain_hamlet_small\",\"weight\":2},\n"
+            + "    {\"structure\":\"" + NS + "terrain_fortified_hamlet\",\"weight\":2},\n"
+            + "    {\"structure\":\"" + NS + "terrain_hamlet_large\",\"weight\":1},\n"
+            + "    {\"structure\":\"" + NS + "terrain_bandit_camp_small\",\"weight\":2},\n"
+            + "    {\"structure\":\"" + NS + "terrain_bandit_camp\",\"weight\":1},\n"
+            + "    {\"structure\":\"" + NS + "terrain_bandit_camp_large\",\"weight\":1},\n"
+            + "    {\"structure\":\"" + NS + "terrain_watchtower_small\",\"weight\":2},\n"
+            + "    {\"structure\":\"" + NS + "terrain_watchtower\",\"weight\":1},\n"
+            + "    {\"structure\":\"" + NS + "terrain_watchtower_large\",\"weight\":1},\n"
+            + "    {\"structure\":\"" + NS + "terrain_fortified_hamlet\",\"weight\":2},\n"
+            + "    {\"structure\":\"" + NS + "terrain_fortified_hamlet\",\"weight\":2},\n"
+            + "    {\"structure\":\"" + NS + "terrain_bandit_camp\",\"weight\":1},\n"
+            + "    {\"structure\":\"" + NS + "terrain_bandit_camp\",\"weight\":1},\n"
+            + "    {\"structure\":\"" + NS + "terrain_bandit_camp\",\"weight\":1},\n"
+            + "    {\"structure\":\"" + NS + "terrain_watchtower\",\"weight\":1},\n"
+            + "    {\"structure\":\"" + NS + "terrain_watchtower\",\"weight\":1},\n"
+            + "    {\"structure\":\"" + NS + "terrain_watchtower\",\"weight\":1},\n"
+            + "    {\"structure\":\"" + NS + "terrain_watchtower\",\"weight\":1}\n  ],\n"
             + "  \"placement\": {\"type\":\"minecraft:random_spread\",\"spacing\":12,\"separation\":4,"
             + "\"spread_type\":\"linear\",\"salt\":1650973021,\n"
-            + "    \"exclusion_zone\":{\"other_set\":\"minecraft:villages\",\"chunk_count\":5}}\n}\n");
-        System.out.println("Frontier sites: one shared placement grid for hamlets, camps and outposts.");
+            + "    \"exclusion_zone\":{\"other_set\":\"minecraft:villages\",\"chunk_count\":7}}\n}\n");
+        System.out.println("Frontier sites: one shared placement grid for all size variants.");
     }
 
     private static boolean insideGround(List<TerrainPlot> plots, int x, int z) {
@@ -267,7 +314,7 @@ public final class GenerateAssets {
         else {
             canvas = new Voxels(name, original.width, original.height, original.depth);
             canvas.fill(groundX, FLOOR, groundZ, groundX + groundWidth - 1, FLOOR,
-                groundZ + groundDepth - 1, state("grass_block", "snowy", "false"));
+                groundZ + groundDepth - 1, SETTLEMENT_GRASS);
             draw.accept(canvas);
         }
         int top = Math.max(FLOOR + 2, canvas.blocks.values().stream()
@@ -285,6 +332,7 @@ public final class GenerateAssets {
             for (int yy = FLOOR; yy <= top; yy++) {
                 Placed source = canvas.blocks.get(new Pos(xx, yy, zz));
                 if (!core && (yy == FLOOR || source.state.equals(AIR))) continue;
+                if (name.startsWith("farm_") && yy == 6 && isCrop(source.state.name)) continue;
                 part.set(xx - x, yy - FLOOR, zz - z, source.state, source.nbt);
             }
         }
@@ -407,11 +455,237 @@ public final class GenerateAssets {
         return v;
     }
 
+
+    private static void house(Voxels v, int x, int z, int w, int d, boolean south, String color,
+                              int beds, String job, String loot) {
+        v.fill(x, FLOOR, z, x + w - 1, FLOOR, z + d - 1, PLANKS);
+        v.fill(x, 6, z, x + w - 1, 8, z, PLANKS);
+        v.fill(x, 6, z + d - 1, x + w - 1, 8, z + d - 1, PLANKS);
+        v.fill(x, 6, z, x, 8, z + d - 1, PLANKS);
+        v.fill(x + w - 1, 6, z, x + w - 1, 8, z + d - 1, PLANKS);
+        for (int xx : new int[] {x, x + w - 1}) for (int zz : new int[] {z, z + d - 1}) v.fill(xx, 6, zz, xx, 9, zz, LOG);
+        int doorX = x + w / 2;
+        int doorZ = south ? z + d - 1 : z;
+        for (int y = 6; y <= 8; y++) v.set(doorX, y, doorZ, AIR);
+        String facing = south ? "south" : "north";
+        v.set(doorX, 6, doorZ, state("oak_door", "facing", facing, "half", "lower", "hinge", "left", "open", "false", "powered", "false"));
+        v.set(doorX, 7, doorZ, state("oak_door", "facing", facing, "half", "upper", "hinge", "left", "open", "false", "powered", "false"));
+        v.doors.add(new Pos(doorX, 6, doorZ));
+        for (int dx = -1; dx <= w; dx++) {
+            int y = 9 + Math.min(2, Math.min(Math.max(dx, 0), Math.max(w - 1 - dx, 0)));
+            State roof = dx < w / 2 ? stairs("spruce", "east") : dx > w / 2 ? stairs("spruce", "west") : state("spruce_planks");
+            for (int dz = -1; dz <= d; dz++) v.set(x + dx, y, z + dz, roof);
+        }
+        int bedColumns = Math.max(1, (w - 3) / 2);
+        for (int i = 0; i < beds; i++) bed(v, x + 1 + 2 * (i % bedColumns), z + 1 + 2 * (i / bedColumns), color);
+        if (job != null) {
+            State station = state(job);
+            if (job.equals("composter")) station = state(job, "level", "0");
+            if (job.equals("stonecutter")) station = state(job, "facing", "north");
+            v.set(x + w - 2, 6, z + d - 2, station);
+        }
+        if (loot != null) chest(v, x + w - 2, 6, z + 1, loot, "south");
+        v.set(x + w - 2, 8, z + d / 2, state("wall_torch", "facing", "west"));
+    }
+
+    private static void customTower(Voxels v, int x, int z, int size, int wallTop) {
+        int max = size - 1;
+        v.fill(x, FLOOR, z, x + max, FLOOR, z + max, COBBLE);
+        v.fill(x, 6, z, x + max, wallTop, z, state("spruce_planks"));
+        v.fill(x, 6, z + max, x + max, wallTop, z + max, state("spruce_planks"));
+        v.fill(x, 6, z, x, wallTop, z + max, state("spruce_planks"));
+        v.fill(x + max, 6, z, x + max, wallTop, z + max, state("spruce_planks"));
+        for (int xx : new int[] {x, x + max}) for (int zz : new int[] {z, z + max}) v.fill(xx, 6, zz, xx, wallTop + 4, zz, LOG);
+        int doorX = x + size / 2;
+        v.fill(doorX - 1, 6, z + max, doorX + 1, 8, z + max, AIR);
+        int deck = wallTop + 1;
+        int stand = deck + 1;
+        v.fill(x, deck, z, x + max, deck, z + max, PLANKS);
+        for (int i = 0; i <= max; i++) {
+            v.set(x + i, stand, z, FENCE); v.set(x + i, stand, z + max, FENCE);
+            v.set(x, stand, z + i, FENCE); v.set(x + max, stand, z + i, FENCE);
+        }
+        for (int px = x + 1; px <= x + max - 1; px++) for (int pz = z + 1; pz <= z + max - 1; pz++) v.platforms.add(new Pos(px, stand, pz));
+        int lx = x + size / 2;
+        v.fill(lx, 6, z, lx, stand + 1, z, LOG);
+        v.fill(lx, 6, z + 1, lx, stand, z + 1, state("ladder", "facing", "south", "waterlogged", "false"));
+        v.ladders.add(new Pos(lx, 6, z + 1));
+        v.fill(x - 1, stand + 3, z - 1, x + max + 1, stand + 3, z + max + 1, state("spruce_planks"));
+        v.fill(x, stand + 4, z, x + max, stand + 4, z + max, state("spruce_slab", "type", "bottom", "waterlogged", "false"));
+        v.set(lx, stand + 2, z + size / 2, state("lantern", "hanging", "true", "waterlogged", "false"));
+        path(v, doorX - 1, z + max + 1, doorX + 1, z + max + 2);
+    }
+
+    private static void smallTent(Voxels v, int x, int z, int w, int d, String cloth, String stripe, String loot) {
+        v.fill(x, FLOOR, z, x + w - 1, FLOOR, z + d - 1, state("spruce_planks"));
+        for (int dx = 0; dx < w; dx++) {
+            int roof = 7 + Math.min(dx, w - 1 - dx);
+            State wool = state((dx == w / 2 ? stripe : cloth) + "_wool");
+            v.fill(x + dx, roof, z, x + dx, roof, z + d - 1, wool);
+            v.fill(x + dx, 6, z, x + dx, roof, z, wool);
+            v.fill(x + dx, 6, z + d - 1, x + dx, roof, z + d - 1, wool);
+        }
+        v.fill(x, 6, z, x, 7, z + d - 1, LOG);
+        v.fill(x + w - 1, 6, z, x + w - 1, 7, z + d - 1, LOG);
+        v.fill(x + w / 2 - 1, 6, z + d - 1, x + w / 2 + 1, 7, z + d - 1, AIR);
+        bed(v, x + 1, z + 1, stripe);
+        if (loot != null) chest(v, x + w - 2, 6, z + 1, loot, "south");
+        v.set(x + w / 2, 8, z + 1, state("wall_torch", "facing", "south"));
+        v.target(x + w / 2, 6, z + d - 1);
+        v.target(x + w / 2, 6, z + d / 2);
+    }
+
+    private static void well(Voxels v, int x, int z) {
+        v.fill(x, FLOOR, z, x + 2, FLOOR, z + 2, state("stone_bricks"));
+        v.set(x + 1, FLOOR, z + 1, state("water", "level", "0"));
+        v.fill(x, 6, z, x + 2, 6, z + 2, state("cobblestone_wall", "up", "true", "north", "none", "south", "none", "east", "none", "west", "none", "waterlogged", "false"));
+        v.fill(x, 7, z, x, 9, z, LOG); v.fill(x + 2, 7, z, x + 2, 9, z, LOG);
+        v.fill(x, 10, z, x + 2, 10, z + 2, state("spruce_slab", "type", "bottom", "waterlogged", "false"));
+        v.target(x + 1, 6, z + 3);
+    }
+
+    private static void pen(Voxels v, int x, int z, int w, int d) {
+        v.fill(x, FLOOR, z, x + w - 1, FLOOR, z + d - 1, SETTLEMENT_GRASS);
+        for (int xx = x; xx < x + w; xx++) { v.set(xx, 6, z, FENCE); v.set(xx, 6, z + d - 1, FENCE); }
+        for (int zz = z; zz < z + d; zz++) { v.set(x, 6, zz, FENCE); v.set(x + w - 1, 6, zz, FENCE); }
+        v.fill(x + 2, 6, z + d - 1, x + 4, 6, z + d - 1, AIR);
+        v.set(x + 1, 6, z + 1, state("hay_block", "axis", "y"));
+        v.target(x + 3, 6, z + d - 1);
+    }
+
+    private static void marketStall(Voxels v, int x, int z, String color) {
+        v.fill(x, FLOOR, z, x + 4, FLOOR, z + 3, state("stone_bricks"));
+        v.fill(x, 6, z, x, 8, z, LOG); v.fill(x + 4, 6, z, x + 4, 8, z, LOG);
+        v.fill(x, 9, z, x + 4, 9, z + 3, state(color + "_wool"));
+        v.set(x + 1, 6, z + 1, state("barrel", "facing", "up", "open", "false"));
+        v.set(x + 3, 6, z + 1, state("crafting_table"));
+    }
+
+
+    private static Voxels hamletSmall() {
+        Voxels v = settlement("hamlet_small", 31, 18);
+        palisade(v, 1, 29, 1, 29, 14, 16, true);
+        path(v, 14, 0, 16, 30); path(v, 2, 14, 28, 16);
+        customTower(v, 3, 3, 5, 8);
+        house(v, 4, 18, 7, 5, false, "yellow", 1, "composter", "hamlet_supplies");
+        house(v, 19, 17, 9, 7, false, "blue", 2, "fletching_table", "hamlet_supplies");
+        path(v, 7, 16, 23, 17);
+        farm(v, 22, 5);
+        v.fill(12, FLOOR, 10, 18, FLOOR, 16, state("stone_bricks"));
+        marketStall(v, 12, 11, "white");
+        board(v, 15, 15, false);
+        v.set(16, 6, 13, COBBLE);
+        v.set(16, 7, 13, state("bell", "attachment", "floor", "facing", "north", "powered", "false"));
+        for (int[] p : new int[][] {{15,2},{10,8},{20,8},{10,22},{20,22},{3,16},{27,16},{15,27}}) lamp(v, p[0], p[1]);
+        v.mob("guard", 14.5, 6, 25.5, 30, false);
+        v.mob("guard", 5.5, 10, 5.5, 30, true);
+        v.mob("quartermaster", 14.5, 6, 12.5, 24, false);
+        v.villager(7.5, 6, 20.5, "farmer");
+        v.villager(22.5, 6, 20.5, "fletcher");
+        v.expected = Map.of(NS + "guard", 2, NS + "quartermaster", 1, "minecraft:villager", 2);
+        v.expectedBeds = 3; v.expectedChests = 2; v.expectedBoards = 1; v.expectedOutpost = 0; v.expectedArchers = 1;
+        return v;
+    }
+
+    private static Voxels hamletLarge() {
+        Voxels v = settlement("hamlet_large", 49, 24);
+        palisade(v, 1, 47, 1, 47, 23, 25, true);
+        path(v, 23, 0, 25, 48); path(v, 2, 23, 46, 25); path(v, 12, 12, 36, 14); path(v, 12, 34, 36, 36);
+        customTower(v, 3, 3, 7, 10); customTower(v, 39, 3, 5, 8); customTower(v, 3, 39, 5, 8); customTower(v, 39, 39, 7, 12);
+        path(v, 6, 10, 23, 12); path(v, 24, 8, 41, 12); path(v, 5, 36, 23, 41); path(v, 25, 36, 42, 46);
+        house(v, 5, 17, 11, 7, true, "red", 4, null, "tower_supplies");
+        house(v, 18, 6, 13, 7, true, "green", 4, "lectern", "hamlet_supplies");
+        house(v, 33, 17, 9, 7, true, "blue", 2, "cartography_table", "hamlet_supplies");
+        house(v, 7, 29, 7, 5, false, "yellow", 1, "composter", "hamlet_supplies");
+        house(v, 34, 30, 9, 7, false, "cyan", 2, "loom", "hamlet_supplies");
+        house(v, 18, 34, 11, 7, false, "lime", 3, "stonecutter", "hamlet_supplies");
+        house(v, 32, 6, 9, 7, true, "orange", 1, "smithing_table", "hamlet_supplies");
+        v.set(34, 6, 8, state("blast_furnace", "facing", "south", "lit", "false"));
+        v.set(35, 6, 8, state("anvil", "facing", "east"));
+        house(v, 30, 38, 7, 7, false, "brown", 0, null, "hamlet_supplies");
+        path(v, 31, 36, 35, 37);
+        v.set(31, 6, 40, state("barrel", "facing", "up", "open", "false")); v.set(32, 6, 40, state("hay_block", "axis", "y"));
+        well(v, 23, 28); pen(v, 5, 8, 8, 6); farm(v, 29, 33); farm(v, 38, 9);
+        v.fill(21, FLOOR, 20, 28, FLOOR, 27, state("stone_bricks"));
+        board(v, 24, 20, false);
+        v.set(24, 6, 26, COBBLE); v.set(24, 7, 26, state("bell", "attachment", "floor", "facing", "north", "powered", "false"));
+        marketStall(v, 18, 22, "white"); marketStall(v, 27, 22, "light_blue");
+        for (int[] p : new int[][] {{12,14},{36,14},{12,36},{36,36},{23,10},{25,40},{5,25},{43,25},{20,2},{28,46},{23,23},{27,27},{42,45}}) lamp(v, p[0], p[1]);
+        v.mob("guard", 10.5, 6, 20.5, 30, false); v.mob("guard", 36.5, 6, 20.5, 30, false);
+        v.mob("guard", 24.5, 6, 43.5, 30, false); v.mob("guard", 8.5, 12, 6.5, 30, true); v.mob("guard", 42.5, 14, 42.5, 30, true);
+        v.mob("quartermaster", 25.5, 6, 23.5, 24, false); v.mob("quartermaster", 19.5, 6, 20.5, 24, false);
+        v.villager(21.5, 6, 9.5, "librarian"); v.villager(36.5, 6, 9.5, "toolsmith"); v.villager(37.5, 6, 33.5, "shepherd");
+        v.villager(10.5, 6, 31.5, "farmer"); v.villager(23.5, 6, 25.5, "mason"); v.villager(33.5, 6, 35.5, "farmer");
+        v.expected = Map.of(NS + "guard", 5, NS + "quartermaster", 2, "minecraft:villager", 6);
+        v.expectedBeds = 17; v.expectedChests = 8; v.expectedBoards = 1; v.expectedOutpost = 0; v.expectedArchers = 2;
+        return v;
+    }
+
+    private static Voxels campSmall() {
+        Voxels v = settlement("bandit_camp_small", 17, 14);
+        path(v, 7, 8, 9, 16); path(v, 4, 8, 12, 10);
+        smallTent(v, 2, 5, 5, 5, "brown", "orange", "bandit_cache");
+        smallTent(v, 10, 5, 5, 5, "gray", "red", "bandit_cache");
+        v.set(8, 6, 10, state("campfire", "facing", "north", "lit", "true", "signal_fire", "false", "waterlogged", "false"));
+        for (int[] p : new int[][] {{4,4},{12,4},{4,12},{12,12}}) { v.fill(p[0], 6, p[1], p[0], 7, p[1], FENCE); v.set(p[0], 8, p[1], state("torch")); }
+        v.mob("bandit", 4.5, 6, 7.5, 24, false); v.mob("bandit", 12.5, 6, 7.5, 24, true);
+        v.expected = Map.of(NS + "bandit", 2); v.expectedBeds = 2; v.expectedChests = 2; v.expectedBoards = 0; v.expectedArchers = 1;
+        return v;
+    }
+
+    private static Voxels campLarge() {
+        Voxels v = settlement("bandit_camp_large", 31, 18);
+        palisade(v, 1, 29, 1, 29, 14, 16, false);
+        path(v, 14, 0, 16, 30); path(v, 3, 15, 27, 17); path(v, 15, 4, 15, 27);
+        smallTent(v, 3, 6, 7, 6, "brown", "orange", "bandit_cache"); smallTent(v, 21, 6, 7, 6, "gray", "red", "bandit_cache");
+        smallTent(v, 4, 20, 7, 6, "light_gray", "red", "bandit_cache"); smallTent(v, 18, 19, 9, 7, "black", "red", "bandit_cache");
+        customTower(v, 13, 3, 5, 8);
+        v.set(15, 6, 17, state("campfire", "facing", "north", "lit", "true", "signal_fire", "false", "waterlogged", "false"));
+        v.fill(23, 6, 14, 25, 6, 14, state("barrel", "facing", "up", "open", "false")); v.set(24, 6, 15, state("hay_block", "axis", "y"));
+        chest(v, 25, 6, 15, "bandit_cache", "south");
+        for (int[] p : new int[][] {{5,4},{25,4},{5,15},{25,15},{7,27},{23,27},{15,23}}) { v.fill(p[0], 6, p[1], p[0], 7, p[1], FENCE); v.set(p[0], 8, p[1], state("torch")); }
+        v.mob("bandit", 6.5, 6, 8.5, 24, false); v.mob("bandit", 24.5, 6, 8.5, 24, true); v.mob("bandit", 7.5, 6, 22.5, 24, false);
+        v.mob("bandit", 15.5, 10, 5.5, 24, true); v.mob("bandit", 22.5, 6, 22.5, 24, false); v.mob("bandit_leader", 22.5, 6, 21.5, 48, false);
+        v.expected = Map.of(NS + "bandit", 5, NS + "bandit_leader", 1); v.expectedBeds = 4; v.expectedChests = 4; v.expectedBoards = 0; v.expectedArchers = 2;
+        return v;
+    }
+
+    private static Voxels watchtowerSmall() {
+        Voxels v = settlement("watchtower_small", 9, 18);
+        customTower(v, 2, 1, 5, 8);
+        house(v, 1, 5, 7, 3, false, "blue", 1, null, "tower_supplies");
+        board(v, 6, 8, true);
+        lamp(v, 1, 8);
+        v.mob("guard", 4.5, 10, 3.5, 30, true); v.mob("guard", 5.5, 6, 8.5, 30, false);
+        v.expected = Map.of(NS + "guard", 2); v.expectedBeds = 1; v.expectedChests = 1; v.expectedBoards = 1; v.expectedOutpost = 1; v.expectedArchers = 1;
+        v.gate(3, 5, 8);
+        return v;
+    }
+
+    private static Voxels watchtowerLarge() {
+        Voxels v = settlement("watchtower_large", 29, 20);
+        palisade(v, 1, 27, 1, 27, 13, 15, true);
+        path(v, 13, 0, 15, 28); path(v, 3, 14, 25, 16);
+        customTower(v, 3, 3, 7, 10); customTower(v, 19, 3, 7, 10);
+        house(v, 4, 18, 11, 7, false, "blue", 4, null, "tower_supplies");
+        house(v, 17, 18, 9, 7, false, "green", 1, "fletching_table", "tower_supplies");
+        path(v, 8, 16, 10, 18); path(v, 20, 16, 22, 18);
+        v.fill(11, FLOOR, 10, 17, FLOOR, 16, state("stone_bricks")); board(v, 14, 11, true);
+        v.set(15, 6, 13, state("barrel", "facing", "up", "open", "false"));
+        v.set(13, 6, 15, state("bell", "attachment", "floor", "facing", "north", "powered", "false"));
+        well(v, 22, 12); marketStall(v, 10, 17, "white");
+        for (int[] p : new int[][] {{9,10},{19,10},{5,25},{23,25},{14,4},{14,24},{3,15},{25,15}}) lamp(v, p[0], p[1]);
+        v.mob("guard", 8.5, 12, 6.5, 30, true); v.mob("guard", 22.5, 12, 6.5, 30, true); v.mob("guard", 15.5, 6, 24.5, 30, false); v.mob("guard", 22.5, 6, 21.5, 30, false);
+        v.mob("quartermaster", 15.5, 6, 16.5, 24, false); v.villager(21.5, 6, 21.5, "fletcher");
+        v.expected = Map.of(NS + "guard", 4, NS + "quartermaster", 1, "minecraft:villager", 1); v.expectedBeds = 5; v.expectedChests = 2; v.expectedBoards = 1; v.expectedOutpost = 1; v.expectedArchers = 2;
+        return v;
+    }
+
     private static Voxels settlement(String name, int width, int height) {
         Voxels v = new Voxels(name, width, height, width);
         v.fill(0, 0, 0, width - 1, 3, width - 1, COBBLE);
-        v.fill(0, 4, 0, width - 1, 4, width - 1, state("dirt"));
-        v.fill(0, FLOOR, 0, width - 1, FLOOR, width - 1, state("grass_block", "snowy", "false"));
+        v.fill(0, 4, 0, width - 1, 4, width - 1, COBBLE);
+        v.fill(0, FLOOR, 0, width - 1, FLOOR, width - 1, SETTLEMENT_GRASS);
         return v;
     }
 
@@ -496,7 +770,6 @@ public final class GenerateAssets {
     private static void bed(Voxels v, int x, int z, String color) {
         v.set(x, 6, z, state(color + "_bed", "part", "foot", "facing", "south", "occupied", "false"));
         v.set(x, 6, z + 1, state(color + "_bed", "part", "head", "facing", "south", "occupied", "false"));
-        v.target(x + 1, 6, z);
     }
 
     private static void roofedTower(Voxels v, int x, int z) {
@@ -514,6 +787,7 @@ public final class GenerateAssets {
         v.set(x + 6, 8, z + 3, state("glass_pane", "north", "true", "south", "true",
             "east", "false", "west", "false", "waterlogged", "false"));
         v.fill(x, 11, z, x + 6, 11, z + 6, PLANKS);
+        for (int px = x + 1; px <= x + 5; px++) for (int pz = z + 1; pz <= z + 5; pz++) v.platforms.add(new Pos(px, 12, pz));
         for (int i = 0; i <= 6; i++) {
             v.set(x + i, 12, z, FENCE);
             v.set(x + i, 12, z + 6, FENCE);
@@ -582,13 +856,12 @@ public final class GenerateAssets {
         v.set(x, 6, z, state(NS + "settlement_board"),
             compound("id", string(NS + "settlement_board"), "Outpost", bit(outpost)));
         v.target(x - 1, 6, z);
-        v.target(x + 1, 6, z);
     }
 
     private static void chest(Voxels v, int x, int y, int z, String table, String facing) {
         v.set(x, y, z, state("chest", "facing", facing, "type", "single", "waterlogged", "false"),
             compound("id", string("minecraft:chest"), "LootTable", string(NS + "chests/" + table)));
-        v.target(x - 1, y, z);
+        v.set(x, y + 1, z, AIR);
     }
 
     private record Pos(int x, int y, int z) {}
@@ -613,7 +886,8 @@ public final class GenerateAssets {
         final List<Pos> doors = new ArrayList<>(), ladders = new ArrayList<>();
         final Set<Pos> targets = new HashSet<>(), paths = new HashSet<>();
         Map<String, Integer> expected = Map.of();
-        int expectedBeds, expectedChests, expectedBoards, expectedOutpost;
+        int expectedBeds, expectedChests, expectedBoards, expectedOutpost, expectedArchers = 1;
+        final Set<Pos> platforms = new HashSet<>();
 
         Voxels(String name, int width, int height, int depth) {
             this.name = name;
@@ -751,10 +1025,10 @@ public final class GenerateAssets {
                 int x = (int) Math.floor(e.x), z = (int) Math.floor(e.z), y = (int) Math.floor(e.y);
                 require(supports(at(x, y - 1, z)), name + ": entity lacks floor");
                 if (y == 6) target(x, y, z);
-                else require(y == 12 && accessible(new Pos(x, y, z)), name + ": invalid platform spawn");
+                else require(platforms.contains(new Pos(x, y, z)) && accessible(new Pos(x, y, z)), name + ": invalid platform spawn");
             }
             require(counts.equals(expected), name + ": unexpected populations " + counts);
-            require(archers == 1, name + ": expected exactly one archer");
+            require(archers == expectedArchers, name + ": expected " + expectedArchers + " archers");
             int boards = 0, chests = 0, beds = 0;
             List<Placed> lights = new ArrayList<>();
             for (Placed b : blocks.values()) {
@@ -772,7 +1046,7 @@ public final class GenerateAssets {
                     require(b.nbt != null && asCompound(b.nbt).get("id").equals(string("minecraft:chest"))
                         && LOOT.contains(asCompound(b.nbt).get("LootTable").value),
                         name + ": missing namespaced chest loot");
-                    require(at(b.pos.x, b.pos.y + 1, b.pos.z).equals(AIR), name + ": blocked chest lid");
+                    require(at(b.pos.x, b.pos.y + 1, b.pos.z).equals(AIR), name + ": blocked chest lid " + b.pos);
                 }
                 if (b.state.name.endsWith("_bed") && "foot".equals(b.state.properties.get("part"))) {
                     beds++;
@@ -793,15 +1067,16 @@ public final class GenerateAssets {
             for (Pos p : doors) {
                 require("lower".equals(at(p.x, p.y, p.z).properties.get("half"))
                     && "upper".equals(at(p.x, p.y + 1, p.z).properties.get("half"))
-                    && at(p.x, p.y + 2, p.z).equals(AIR), name + ": invalid cottage doorway");
+                    && at(p.x, p.y + 2, p.z).equals(AIR), name + ": invalid cottage doorway " + p + " block=" + at(p.x, p.y + 2, p.z).name);
             }
             for (Pos p : ladders) {
-                for (int y = 6; y <= 12; y++) {
-                    require(at(p.x, y, p.z).name.equals("minecraft:ladder")
-                        && "south".equals(at(p.x, y, p.z).properties.get("facing"))
+                int top = p.y - 1;
+                for (int y = p.y; y < height && at(p.x, y, p.z).name.equals("minecraft:ladder"); y++) {
+                    require("south".equals(at(p.x, y, p.z).properties.get("facing"))
                         && at(p.x, y, p.z - 1).equals(LOG), name + ": unsupported/misoriented ladder");
+                    top = y;
                 }
-                require(accessible(new Pos(p.x + 1, 12, p.z)), name + ": obstructed ladder exit");
+                require(top >= p.y && accessible(new Pos(p.x + 1, top, p.z)), name + ": obstructed ladder exit");
             }
             Set<Pos> reachable = new HashSet<>();
             ArrayDeque<Pos> queue = new ArrayDeque<>();
@@ -886,7 +1161,7 @@ public final class GenerateAssets {
 
     private static boolean passable(State s) {
         return Set.of("minecraft:air", "minecraft:ladder", "minecraft:torch", "minecraft:wall_torch",
-            "minecraft:wheat", "minecraft:carrots", "minecraft:potatoes", "minecraft:lily_pad").contains(s.name)
+            "minecraft:wheat", "minecraft:carrots", "minecraft:potatoes", "minecraft:beetroots", "minecraft:lily_pad").contains(s.name)
             || s.name.endsWith("_door");
     }
 
